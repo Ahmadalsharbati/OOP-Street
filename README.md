@@ -25,7 +25,7 @@ Every class becomes a district with its blueprint board, and every `new` builds 
 | `main` | a person walking in the street, doing each line |
 | Garbage Collector | a robot that cleans houses nobody points at |
 
-## What works today (phase 1 + 2)
+## What works today (phases 1–3)
 
 - **A real Java interpreter, written in JavaScript**, for the part of Java taught in a first OOP course:
   classes, fields, constructors (with overloading and `this(...)`), methods, `static`, `final`,
@@ -39,7 +39,18 @@ Every class becomes a district with its blueprint board, and every `new` builds 
   `jean cannot be resolved to a variable`, `The constructor Etudiant() is undefined`,
   `NullPointerException: Cannot invoke "Etudiant.getNom()" because "jean" is null`, `StackOverflowError`...
 - **Variables view** like the Eclipse debugger (ids, yellow = changed now) and the call stack (pile).
-- **A first 3D street** (three.js): one district per class, one house per object.
+- **The 3D street** (three.js):
+  - every class is a district with its **blueprint board**: fields, how to build a house (`new`), methods,
+    with 🔒 private, + public, ~ package, S static, F final.
+  - `static` fields live in a shared **kiosk** next to the board.
+  - every object is a **house** that grows when built: its card shows the baskets (fields) and values,
+    a red **lock** if it has private fields, **windows** for its public methods.
+  - a wooden **person** walks to the house where the code runs. Their card shows the method and its
+    variables (signs). **Yellow arrows**: variable ➜ object (pile ➜ tas). **Green arrows**: field ➜ other object.
+  - arrays are rows of numbered **mailboxes**.
+  - bubbles: 🔨 new house built, ↩ value given back, 🖨 console, 🔒 blocked (the lock shakes), ✖ error.
+  - grey house = nobody points at it any more (Garbage Collector).
+  - camera follows the person (Follow), or see everything (Fit all).
 
 Not supported yet (you get a clear message, never a silent failure):
 inheritance (`extends`), interfaces, `ArrayList`, `Scanner`, lambdas.
@@ -94,7 +105,7 @@ vendor/three/           three.js (MIT license), no CDN needed
 
 1. ✅ Setup: repository, structure, three.js, GitHub Pages
 2. ✅ The generic interpreter + tests against the real JVM
-3. The 3D street: baskets, locks, windows, people with signs, camera that follows the line
+3. ✅ The 3D street: baskets, locks, windows, people with signs, camera that follows the line
 4. Connect every step to the street: new / get / set / private / public, Step Into, errors in the scene
 5. Associations and arrays (Livre → Auteur, Etudiant ⇄ Classe) and a live UML diagram
 6. static, final, pile/tas, Garbage Collector, null

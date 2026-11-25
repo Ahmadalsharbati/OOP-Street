@@ -223,7 +223,7 @@ export class Interpreter {
       else yield* this.stop(method.endLine); // the closing "}" — like Eclipse
     }
     this.frames.pop();
-    this.event({ type: 'return', cls: cls.name, method: method.isCtor ? '<init>' : method.name, value: result ? this.describeValue(result) : null });
+    this.event({ type: 'return', cls: cls.name, method: method.isCtor ? '<init>' : method.name, thisId: thisObj?.id ?? null, value: result ? this.describeValue(result) : null });
     return result;
   }
 
@@ -1303,7 +1303,7 @@ export class Interpreter {
         const inner = this.describeExprRaw(e.target);
         return `"${inner}.${e.name}"`;
       }
-      case 'Index': return `"${this.describeExprRaw(e.target)}[...]"`;
+      case 'Index': return `"${this.describeExprRaw(e)}"`;
       case 'Call': {
         const t = e.target ? this.guessStaticType(e.target) : this.currentClass?.name;
         const m = this.findMethodDecl(t, e.name);
@@ -1318,8 +1318,10 @@ export class Interpreter {
       case 'Name': return this.lookupLocal(e.name) ? e.name : (this.currentClass?.fields.get(e.name) ? 'this.' + e.name : e.name);
       case 'This': return 'this';
       case 'Field': return this.describeExprRaw(e.target) + '.' + e.name;
-      case 'Index': return this.describeExprRaw(e.target) + '[...]';
-      case 'Call': return e.name + '(...)';
+      case 'Index': return this.describeExprRaw(e.target) + '[' + this.describeExprRaw(e.index) + ']';
+      case 'Literal': return String(e.value);
+      case 'Paren': return this.describeExprRaw(e.expr);
+      case 'Call': return (e.target ? this.guessStaticType(e.target) : this.currentClass?.name) + '.' + e.name + '(...)';
       default: return '...';
     }
   }

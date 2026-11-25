@@ -136,8 +136,7 @@ function show() {
   renderVariables(state, prev?.state);
 
   // 3D
-  const top = state.frames[state.frames.length - 1];
-  scene.update(state, top ? top.thisId : null);
+  scene.update(step);
   updateButtons();
 }
 
@@ -166,7 +165,12 @@ $('btn-next').addEventListener('click', stepOver);
 $('btn-back').addEventListener('click', back);
 $('btn-end').addEventListener('click', toEnd);
 $('btn-reset').addEventListener('click', reset);
-$('btn-fit').addEventListener('click', () => scene.fitAll());
+$('btn-fit').addEventListener('click', () => { scene.fitAll(); setFollow(false); });
+function setFollow(on) {
+  scene.setFollow(on);
+  $('btn-follow').classList.toggle('on', on);
+}
+$('btn-follow').addEventListener('click', () => setFollow(!scene.follow));
 $('main-class').addEventListener('change', compileAndRun);
 
 document.addEventListener('keydown', (e) => {

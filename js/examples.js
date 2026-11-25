@@ -131,4 +131,89 @@ public class Launcher {
 }
 `,
   },
+  {
+    id: 'static-compteur',
+    title: 'static: one shared counter (Patient)',
+    code: `class Patient {
+    private static int compteur = 0;
+    private final int id;
+    private String nom;
+
+    public Patient(String nom) {
+        compteur++;
+        this.id = compteur;
+        this.nom = nom;
+    }
+
+    public static int getCompteur() {
+        return compteur;
+    }
+
+    public String toString() {
+        return "Patient " + id + ": " + nom;
+    }
+}
+
+public class Launcher {
+    public static void main(String[] args) {
+        Patient p1 = new Patient("Ali");
+        Patient p2 = new Patient("Lina");
+        Patient p3 = new Patient("Sam");
+        System.out.println(p2);
+        System.out.println(Patient.getCompteur());
+        p1 = null;
+    }
+}
+`,
+  },
+  {
+    id: 'static-error',
+    title: 'Try the bug: method called on the class',
+    code: `class Etudiant {
+    private String nom;
+
+    public Etudiant(String nom) {
+        this.nom = nom;
+    }
+
+    public String getNom() {
+        return nom;
+    }
+}
+
+public class Launcher {
+    public static void main(String[] args) {
+        Etudiant jean = new Etudiant("Jean");
+        System.out.println(jean.getNom());
+        System.out.println(Etudiant.getNom());
+    }
+}
+`,
+  },
+  {
+    id: 'npe',
+    title: 'Try the bug: NullPointerException',
+    code: `class Livre {
+    private String titre;
+
+    public Livre(String titre) {
+        this.titre = titre;
+    }
+
+    public String getTitre() {
+        return titre;
+    }
+}
+
+public class Launcher {
+    public static void main(String[] args) {
+        Livre[] etagere = new Livre[3];
+        etagere[0] = new Livre("Java pour les nuls");
+        for (int i = 0; i < etagere.length; i++) {
+            System.out.println(etagere[i].getTitre());
+        }
+    }
+}
+`,
+  },
 ];

@@ -53,7 +53,15 @@
     <section class="panel scene-panel">
       <div id="scene" class="scene"></div>
       <div id="labels" class="labels"></div>
-      <button id="btn-fit" class="fit">Fit all</button>
+      <div class="scene-buttons">
+        <button id="btn-follow" class="on" title="The camera follows the person">Follow</button>
+        <button id="btn-fit" title="See the whole street">Fit all</button>
+      </div>
+      <div class="legend">
+        <span><i class="sw pile"></i>variable ➜ object (pile ➜ tas)</span>
+        <span><i class="sw heap"></i>field ➜ other object</span>
+        <span>🔒 private · + public · ~ package · S static · F final</span>
+      </div>
       <div class="scene-note">Drag to turn · Scroll to zoom · Right-drag to move</div>
     </section>
 

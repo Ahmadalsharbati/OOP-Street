@@ -1,59 +1,88 @@
 // layout.js — decides WHERE things go in the world. No drawing here, only positions.
 //
 // Rule (spec §8): every class has its own district (a square of land).
-// Districts are placed on a grid. Inside a district: the blueprint board at the back,
-// the houses (objects of that class) in rows in front of it.
+// Districts are placed on a grid. Inside a district:
+//   - at the back: the blueprint board (and the static kiosk if the class has static fields)
+//   - in front: the houses (objects of that class), in rows
+// Arrays get their own district: rows of numbered mailboxes.
 // The world grows by itself when more classes or objects appear.
 
-export const DISTRICT = { width: 14, depth: 12, gap: 4 };
-export const HOUSE = { width: 3.2, depth: 3.2, gapX: 1.2, gapZ: 1.6, perRow: 3 };
+export const DISTRICT = { width: 22, gap: 6, backDepth: 10, frontPad: 4 };
+export const HOUSE = { width: 3, spacingX: 6.8, spacingZ: 7.5, perRow: 3 };
+export const BOX = { size: 1.1, gap: 0.15, maxShown: 10, rowGap: 3.2 };
+
+// Arrays that only add noise: the empty "String[] args" of main.
+export function visibleArrays(state) {
+  const argsIds = new Set();
+  for (const f of state.frames) {
+    for (const v of f.vars) if (v.name === 'args' && v.value.kind === 'array' && v.value.length === 0) argsIds.add(v.value.id);
+  }
+  return state.heap.filter(o => o.isArray && !argsIds.has(o.id) && !(o.items.length === 0 && o.type === 'String[]' && !o.reachable));
+}
 
 export function computeLayout(state) {
-  const classes = state.classes;
-  const cols = Math.max(1, Math.ceil(Math.sqrt(classes.length)));
-  const objectsByClass = new Map(classes.map(c => [c.name, []]));
-  for (const o of state.heap) {
-    if (!o.isArray && objectsByClass.has(o.cls)) objectsByClass.get(o.cls).push(o);
-  }
+  const cells = state.classes.map(c => ({ kind: 'class', name: c.name, cls: c, objects: [] }));
+  const byName = new Map(cells.map(c => [c.name, c]));
+  for (const o of state.heap) if (!o.isArray && byName.has(o.cls)) byName.get(o.cls).objects.push(o);
+  const arrays = visibleArrays(state);
+  if (arrays.length) cells.push({ kind: 'arrays', name: '[ ] arrays', objects: arrays });
 
-  // a district gets deeper when it has many houses
-  const rowsNeeded = (n) => Math.max(1, Math.ceil(n / HOUSE.perRow));
-  const districtDepth = (n) => Math.max(DISTRICT.depth, 6 + rowsNeeded(n) * (HOUSE.depth + HOUSE.gapZ));
+  const cols = Math.max(1, Math.ceil(Math.sqrt(cells.length)));
+  const cellDepth = (c) => {
+    if (c.kind === 'arrays') return DISTRICT.backDepth - 3 + c.objects.length * BOX.rowGap + DISTRICT.frontPad;
+    const rows = Math.max(1, Math.ceil(c.objects.length / HOUSE.perRow));
+    return DISTRICT.backDepth + rows * HOUSE.spacingZ + DISTRICT.frontPad - 2;
+  };
 
-  const districts = [];
   const rowDepths = [];
-  classes.forEach((c, i) => {
-    const row = Math.floor(i / cols);
-    rowDepths[row] = Math.max(rowDepths[row] || 0, districtDepth(objectsByClass.get(c.name).length));
+  cells.forEach((c, i) => {
+    const r = Math.floor(i / cols);
+    rowDepths[r] = Math.max(rowDepths[r] || 0, cellDepth(c));
   });
-
   let z = 0;
-  const rowZ = rowDepths.map(d => { const start = z; z += d + DISTRICT.gap; return start; });
+  const rowZ = rowDepths.map(d => { const s = z; z += d + DISTRICT.gap; return s; });
   const totalW = cols * DISTRICT.width + (cols - 1) * DISTRICT.gap;
   const totalD = z - DISTRICT.gap;
 
-  classes.forEach((c, i) => {
+  const districts = [];
+  const houses = new Map();   // object id -> {x, z, cls}
+  const arrayPos = new Map(); // array id -> {x, z, boxes: [{index, x, z}], shown, length}
+
+  cells.forEach((c, i) => {
     const col = i % cols, row = Math.floor(i / cols);
     const x0 = col * (DISTRICT.width + DISTRICT.gap) - totalW / 2;
     const z0 = rowZ[row] - totalD / 2;
     const depth = rowDepths[row];
-    const houses = objectsByClass.get(c.name).map((o, k) => {
-      const hr = Math.floor(k / HOUSE.perRow), hc = k % HOUSE.perRow;
-      const rowWidth = HOUSE.perRow * HOUSE.width + (HOUSE.perRow - 1) * HOUSE.gapX;
-      return {
-        id: o.id,
-        x: x0 + (DISTRICT.width - rowWidth) / 2 + HOUSE.width / 2 + hc * (HOUSE.width + HOUSE.gapX),
-        z: z0 + 5.5 + HOUSE.depth / 2 + hr * (HOUSE.depth + HOUSE.gapZ),
-      };
-    });
-    districts.push({
-      cls: c.name,
-      x: x0 + DISTRICT.width / 2, z: z0 + depth / 2,
-      width: DISTRICT.width, depth,
-      board: { x: x0 + DISTRICT.width / 2, z: z0 + 1.6 },
-      houses,
-    });
+    const d = {
+      kind: c.kind, name: c.name, cls: c.cls || null,
+      x: x0 + DISTRICT.width / 2, z: z0 + depth / 2, width: DISTRICT.width, depth,
+      board: { x: x0 + 6.5, z: z0 + 2.2 },
+      kiosk: { x: x0 + 16.5, z: z0 + 2.8 },
+      spot: { x: x0 + 6.5, z: z0 + 6.5 }, // where the person stands to use the class itself (static)
+    };
+    districts.push(d);
+
+    if (c.kind === 'class') {
+      c.objects.forEach((o, k) => {
+        const hr = Math.floor(k / HOUSE.perRow), hc = k % HOUSE.perRow;
+        const x = x0 + DISTRICT.width / 2 + (hc - (HOUSE.perRow - 1) / 2) * HOUSE.spacingX;
+        const hz = z0 + DISTRICT.backDepth + 1.5 + hr * HOUSE.spacingZ;
+        houses.set(o.id, { x, z: hz, cls: c.name, spot: { x: x + 1.2, z: hz + 3.3 } });
+      });
+    } else {
+      c.objects.forEach((a, k) => {
+        const shown = Math.min(a.items.length, BOX.maxShown);
+        const rowW = shown * (BOX.size + BOX.gap);
+        const ax = x0 + 2.5, az = z0 + 3 + k * BOX.rowGap;
+        const boxes = [];
+        for (let b = 0; b < shown; b++) boxes.push({ index: b, x: ax + b * (BOX.size + BOX.gap) + BOX.size / 2, z: az });
+        arrayPos.set(a.id, { x: ax + rowW / 2, z: az, boxes, shown, length: a.items.length, spot: { x: ax + rowW / 2, z: az + 1.6 } });
+      });
+    }
   });
 
-  return { districts, width: Math.max(totalW, DISTRICT.width), depth: Math.max(totalD, DISTRICT.depth) };
+  return {
+    districts, houses, arrayPos,
+    width: Math.max(totalW, DISTRICT.width), depth: Math.max(totalD, 12),
+  };
 }
