@@ -7,8 +7,9 @@
 // Arrays get their own district: rows of numbered mailboxes.
 // The world grows by itself when more classes or objects appear.
 
-export const DISTRICT = { width: 22, gap: 6, backDepth: 10, frontPad: 4 };
-export const HOUSE = { width: 3, spacingX: 6.8, spacingZ: 7.5, perRow: 3 };
+export const DISTRICT = { width: 30, gap: 7, backDepth: 10, frontPad: 4 };
+// district: [ stand + kiosk | houses ]
+export const HOUSE = { width: 4.5, spacingX: 9, spacingZ: 9.5, perRow: 2 };
 export const BOX = { size: 1.1, gap: 0.15, maxShown: 10, rowGap: 3.2 };
 
 // Arrays that only add noise: the empty "String[] args" of main.
@@ -31,7 +32,8 @@ export function computeLayout(state) {
   const cellDepth = (c) => {
     if (c.kind === 'arrays') return DISTRICT.backDepth - 3 + c.objects.length * BOX.rowGap + DISTRICT.frontPad;
     const rows = Math.max(1, Math.ceil(c.objects.length / HOUSE.perRow));
-    return DISTRICT.backDepth + rows * HOUSE.spacingZ + DISTRICT.frontPad - 2;
+    const hasKiosk = c.cls.fields.some(f => f.static);
+    return Math.max(hasKiosk ? 18 : 13, 3 + rows * HOUSE.spacingZ + 1);
   };
 
   const rowDepths = [];
@@ -56,18 +58,20 @@ export function computeLayout(state) {
     const d = {
       kind: c.kind, name: c.name, cls: c.cls || null,
       x: x0 + DISTRICT.width / 2, z: z0 + depth / 2, width: DISTRICT.width, depth,
-      board: { x: x0 + 6.5, z: z0 + 2.2 },
-      kiosk: { x: x0 + 16.5, z: z0 + 2.8 },
-      spot: { x: x0 + 6.5, z: z0 + 6.5 }, // where the person stands to use the class itself (static)
+      // left column: the blueprint stand, the person's spot for static code, the kiosk
+      board: { x: x0 + 4.5, z: z0 + 3 },
+      spot: { x: x0 + 4.5, z: z0 + 7.5 },
+      kiosk: { x: x0 + 4.5, z: z0 + 14 }, // where the person stands to use the class itself (static)
     };
     districts.push(d);
 
     if (c.kind === 'class') {
       c.objects.forEach((o, k) => {
         const hr = Math.floor(k / HOUSE.perRow), hc = k % HOUSE.perRow;
-        const x = x0 + DISTRICT.width / 2 + (hc - (HOUSE.perRow - 1) / 2) * HOUSE.spacingX;
-        const hz = z0 + DISTRICT.backDepth + 1.5 + hr * HOUSE.spacingZ;
-        houses.set(o.id, { x, z: hz, cls: c.name, spot: { x: x + 1.2, z: hz + 3.3 } });
+        // right part: the houses, two per row
+        const x = x0 + 14 + hc * HOUSE.spacingX;
+        const hz = z0 + 5 + hr * HOUSE.spacingZ;
+        houses.set(o.id, { x, z: hz, cls: c.name, spot: { x: x + 1.6, z: hz + 4.4 } });
       });
     } else {
       c.objects.forEach((a, k) => {

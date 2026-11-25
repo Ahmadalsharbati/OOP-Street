@@ -1,21 +1,27 @@
-// main.js — connects everything: the code editor, the runner, the 3D street and the panels.
+// main.js — connects everything: the code editor, the runner, the street and the panels.
 
 import { runProgram } from './java/runner.js';
 import { StreetScene } from './scene/scene.js';
 import { explainStep } from './ui/explain.js';
+import { highlightJava } from './ui/highlight.js';
 import { EXAMPLES } from './examples.js';
 
 const $ = (id) => document.getElementById(id);
 const editor = $('code');
+const highlight = $('highlight');
 const gutter = $('gutter');
 const lineMark = $('line-mark');
 const errorMark = $('error-mark');
+const LINE_H = 21;
+const PAD_TOP = 10;
 
 const scene = new StreetScene($('scene'), $('labels'));
+scene.onFollowChange = (on) => $('btn-follow').classList.toggle('on', on);
 
 let run = null;      // result of runProgram
 let index = 0;       // current step
 let dirty = false;   // code changed since last Run
+let lastOutputLen = 0;
 
 // ---------- examples ----------
 for (const ex of EXAMPLES) {
@@ -25,51 +31,53 @@ for (const ex of EXAMPLES) {
 }
 $('example').addEventListener('change', () => {
   const ex = EXAMPLES.find(e => e.id === $('example').value);
-  if (ex) { editor.value = ex.code; compileAndRun(); }
+  if (ex) { editor.value = ex.code; refreshEditor(); compileAndRun(); }
 });
 
 // ---------- editor ----------
-const LINE_H = 20;
-function refreshGutter() {
+function refreshEditor() {
   const n = editor.value.split('\n').length;
   let s = '';
   for (let i = 1; i <= n; i++) s += i + '\n';
   gutter.textContent = s;
+  highlight.innerHTML = highlightJava(editor.value) + '\n';
+  syncScroll();
 }
-editor.addEventListener('input', () => {
-  refreshGutter();
-  if (!dirty) { dirty = true; $('status').textContent = 'Code changed: press Run (Ctrl+Enter)'; $('status').className = 'status warn'; }
-});
-editor.addEventListener('scroll', () => {
+function syncScroll() {
+  highlight.scrollTop = editor.scrollTop;
+  highlight.scrollLeft = editor.scrollLeft;
   gutter.scrollTop = editor.scrollTop;
   positionMarks();
+}
+editor.addEventListener('input', () => {
+  refreshEditor();
+  if (!dirty) { dirty = true; setStatus('Code changed — press Run', 'warn'); }
 });
+editor.addEventListener('scroll', syncScroll);
 editor.addEventListener('keydown', (e) => {
   if (e.key === 'Tab') {
     e.preventDefault();
-    const s = editor.selectionStart;
-    editor.setRangeText('    ', s, editor.selectionEnd, 'end');
+    editor.setRangeText('    ', editor.selectionStart, editor.selectionEnd, 'end');
     editor.dispatchEvent(new Event('input'));
-  }
+  } else if (e.key === 'F5') { e.preventDefault(); stepInto(); }
+  else if (e.key === 'F6') { e.preventDefault(); stepOver(); }
 });
 
-function markLine(el, line) {
-  el.dataset.line = line || '';
-  positionMarks();
-}
+function markLine(el, line) { el.dataset.line = line || ''; positionMarks(); }
 function positionMarks() {
   for (const el of [lineMark, errorMark]) {
     const line = Number(el.dataset.line);
     if (!line) { el.style.display = 'none'; continue; }
     el.style.display = 'block';
-    el.style.top = (8 + (line - 1) * LINE_H - editor.scrollTop) + 'px';
+    el.style.top = (PAD_TOP + (line - 1) * LINE_H - editor.scrollTop) + 'px';
   }
 }
 function scrollToLine(line) {
   if (!line) return;
   const y = (line - 1) * LINE_H;
-  if (y < editor.scrollTop + 20 || y > editor.scrollTop + editor.clientHeight - 60) {
+  if (y < editor.scrollTop + 30 || y > editor.scrollTop + editor.clientHeight - 80) {
     editor.scrollTop = Math.max(0, y - editor.clientHeight / 3);
+    syncScroll();
   }
 }
 
@@ -78,28 +86,37 @@ function compileAndRun() {
   dirty = false;
   scene.reset();
   run = runProgram(editor.value, { mainClass: $('main-class').value || null });
-  // main class chooser (when several classes have a main)
   const sel = $('main-class');
   sel.replaceChildren(...run.mainClasses.map(n => { const o = document.createElement('option'); o.value = o.textContent = n; return o; }));
   sel.value = run.mainClass || '';
   $('main-wrap').hidden = run.mainClasses.length < 2;
   index = 0;
+  lastOutputLen = 0;
+  setFollow(true);
   show();
 }
 
+function setStatus(text, kind = '') {
+  const s = $('status');
+  s.textContent = text;
+  s.className = 'status ' + kind;
+}
+
 function show() {
-  const status = $('status');
+  const caption = $('explain');
   if (!run.steps.length) {
-    // the code could not even start (syntax error, no main...)
-    status.textContent = run.error.kind === 'syntax' ? 'Syntax error: fix the red line' : 'Cannot start';
-    status.className = 'status error';
+    // the code could not start (syntax error, no main...)
+    setStatus(run.error.kind === 'syntax' ? 'Syntax error' : 'Cannot start', 'error');
     $('console').replaceChildren(consoleLine(run.error.console, 'err'));
-    $('explain').replaceChildren(para(run.error.hint || run.error.message || ''));
-    $('variables').replaceChildren();
+    openTab('console');
+    caption.className = 'caption error';
+    caption.replaceChildren(para(run.error.kind === 'syntax' ? `Line ${run.error.line}: ${run.error.message}` : run.error.console), ...(run.error.hint ? [para(run.error.hint)] : []));
+    $('variables').replaceChildren(para('Fix the code, then press Run.', 'empty-note'));
     markLine(lineMark, null);
     markLine(errorMark, run.error.line);
     scrollToLine(run.error.line);
     $('step-count').textContent = '';
+    $('progress-bar').style.width = '0';
     updateButtons();
     return;
   }
@@ -108,34 +125,35 @@ function show() {
   const prev = run.steps[index - 1];
   const state = step.state;
 
-  markLine(lineMark, step.line);
-  scrollToLine(step.line);
+  markLine(lineMark, step.final ? null : step.line);
   markLine(errorMark, step.final && step.error ? step.error.line : null);
-  if (step.final && step.error) scrollToLine(step.error.line);
+  scrollToLine(step.final && step.error ? step.error.line : step.line);
 
-  $('step-count').textContent = `Step ${index + 1} / ${run.steps.length}`;
+  $('step-count').textContent = `${index + 1} / ${run.steps.length}`;
+  $('progress-bar').style.width = (100 * (index + 1) / run.steps.length) + '%';
   if (step.final) {
-    status.textContent = step.error ? (step.error.kind === 'exception' ? 'Stopped: exception' : step.error.kind === 'compile' ? 'Stopped: compilation problem' : 'Stopped') : 'Finished';
-    status.className = 'status ' + (step.error ? 'error' : 'ok');
+    const e = step.error;
+    setStatus(e ? (e.kind === 'exception' ? 'Exception' : e.kind === 'compile' ? 'Compilation problem' : 'Stopped') : 'Finished ✓', e ? 'error' : 'ok');
   } else {
-    status.textContent = `Line ${step.line} (not executed yet)`;
-    status.className = 'status';
+    setStatus(`Line ${step.line}`);
   }
 
-  // explanation
-  $('explain').replaceChildren(...explainStep(step, prev).map(para));
+  // caption under the street
+  const lines = explainStep(step, prev);
+  caption.className = 'caption' + (step.final && step.error ? ' error' : '');
+  caption.replaceChildren(...lines.slice(0, 3).map(t => para(t)));
 
   // console
   const out = state.output.filter((o, i, a) => !(i === a.length - 1 && o.text === ''));
   const nodes = out.map(o => consoleLine(o.text, o.kind));
   if (step.final && step.error) nodes.push(consoleLine(step.error.console, 'err'));
   $('console').replaceChildren(...nodes);
-  $('console').scrollTop = 1e9;
+  $('console').parentElement.scrollTop = 1e9;
+  if (nodes.length > lastOutputLen && currentTab !== 'console') $('console-dot').hidden = false;
+  lastOutputLen = nodes.length;
+  if (step.final && step.error) openTab('console');
 
-  // variables (Eclipse "Variables" view) for the current frame + call stack
   renderVariables(state, prev?.state);
-
-  // 3D
   scene.update(step);
   updateButtons();
 }
@@ -149,15 +167,22 @@ function updateButtons() {
 
 function stepInto() { if (run && index < run.steps.length - 1) { index++; show(); } }
 function stepOver() {
-  if (!run) return;
+  if (!run || index >= run.steps.length - 1) return;
   const d = run.steps[index].depth;
   let j = index + 1;
   while (j < run.steps.length - 1 && run.steps[j].depth > d) j++;
-  if (j < run.steps.length) { index = j; show(); }
+  index = j; show();
 }
 function back() { if (run && index > 0) { index--; show(); } }
 function toEnd() { if (run) { index = run.steps.length - 1; show(); } }
 function reset() { if (run) { index = 0; show(); } }
+
+function setFollow(on) { scene.setFollow(on); $('btn-follow').classList.toggle('on', on); }
+function setFocus(on) {
+  scene.setFocus(on);
+  $('btn-focus').classList.toggle('on', on);
+  $('btn-all').classList.toggle('on', !on);
+}
 
 $('btn-run').addEventListener('click', compileAndRun);
 $('btn-step').addEventListener('click', stepInto);
@@ -165,33 +190,39 @@ $('btn-next').addEventListener('click', stepOver);
 $('btn-back').addEventListener('click', back);
 $('btn-end').addEventListener('click', toEnd);
 $('btn-reset').addEventListener('click', reset);
-$('btn-fit').addEventListener('click', () => { scene.fitAll(); setFollow(false); });
-function setFollow(on) {
-  scene.setFollow(on);
-  $('btn-follow').classList.toggle('on', on);
-}
-$('btn-follow').addEventListener('click', () => setFollow(!scene.follow));
+$('btn-fit').addEventListener('click', () => { setFollow(false); scene.fitAll(); });
+$('btn-follow').addEventListener('click', () => { const on = !scene.follow; setFollow(on); if (on) scene.focusView(); });
+$('btn-focus').addEventListener('click', () => setFocus(true));
+$('btn-all').addEventListener('click', () => setFocus(false));
+$('btn-legend').addEventListener('click', () => { const l = $('legend'); l.hidden = !l.hidden; $('btn-legend').classList.toggle('on', !l.hidden); });
+$('btn-zoom-in').addEventListener('click', () => scene.zoomBy(1.25));
+$('btn-zoom-out').addEventListener('click', () => scene.zoomBy(0.8));
 $('main-class').addEventListener('change', compileAndRun);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); compileAndRun(); return; }
   if (document.activeElement === editor) return;
-  if (e.key === 'F5') { e.preventDefault(); stepInto(); }
-  else if (e.key === 'F6') { e.preventDefault(); stepOver(); }
-  else if (e.key === 'ArrowLeft' || e.key === 'Backspace') { e.preventDefault(); back(); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); stepInto(); }
+  if (e.key === 'F5' || e.key === 'ArrowRight') { e.preventDefault(); stepInto(); }
+  else if (e.key === 'F6' || e.key === 'ArrowDown') { e.preventDefault(); stepOver(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }
 });
-// F5/F6 also work while the editor has focus
-editor.addEventListener('keydown', (e) => {
-  if (e.key === 'F5') { e.preventDefault(); stepInto(); }
-  else if (e.key === 'F6') { e.preventDefault(); stepOver(); }
-});
+
+// ---------- tabs ----------
+let currentTab = 'vars';
+function openTab(name) {
+  currentTab = name;
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t.dataset.tab === name);
+  $('tab-vars').hidden = name !== 'vars';
+  $('tab-console').hidden = name !== 'console';
+  if (name === 'console') $('console-dot').hidden = true;
+}
+for (const t of document.querySelectorAll('.tab')) t.addEventListener('click', () => openTab(t.dataset.tab));
 
 // ---------- panels ----------
-function para(text) { const p = document.createElement('p'); p.textContent = text; return p; }
+function para(text, cls) { const p = document.createElement('p'); p.textContent = text; if (cls) p.className = cls; return p; }
 function consoleLine(text, kind) { const d = document.createElement('div'); d.className = 'c-' + kind; d.textContent = text; return d; }
 
-function valueText(v, heap) {
+function valueText(v) {
   switch (v.kind) {
     case 'unset': return '(no value yet)';
     case 'null': return 'null';
@@ -199,7 +230,7 @@ function valueText(v, heap) {
     case 'prim': return v.type === 'char' ? `'${v.text}'` : v.text;
     case 'object': return `${v.cls} (id=${v.id})`;
     case 'array': return `${v.type} (id=${v.id}) length ${v.length}`;
-    default: void heap; return '';
+    default: return '';
   }
 }
 
@@ -207,7 +238,7 @@ function renderVariables(state, prevState) {
   const root = $('variables');
   root.replaceChildren();
   const frames = state.frames;
-  if (!frames.length) { root.appendChild(para('No method is running.')); return; }
+  if (!frames.length) { root.appendChild(para('No method is running.', 'empty-note')); return; }
   const top = frames[frames.length - 1];
   const prevTop = prevState?.frames.find(f => f.id === top.id && f.label === top.label);
   const heap = new Map(state.heap.map(o => [o.id, o]));
@@ -221,19 +252,19 @@ function renderVariables(state, prevState) {
   const rows = [];
   if (top.thisId !== null) rows.push({ name: 'this', value: { kind: 'object', id: top.thisId, cls: top.cls } });
   for (const v of top.vars) rows.push(v);
+  if (!rows.length) root.appendChild(para('No variables yet.', 'empty-note'));
   for (const r of rows) {
     const prev = prevTop?.vars.find(x => x.name === r.name);
-    const changed = r.name !== 'this' && (!prev || valueText(prev.value) !== valueText(r.value));
-    root.appendChild(varRow(r.name, r.value, changed && !!prevState, heap, prevHeap, 0));
+    const changed = !!prevState && r.name !== 'this' && (!prev || valueText(prev.value) !== valueText(r.value));
+    root.appendChild(varRow(r.name, r.value, changed, heap, prevHeap, 0));
   }
 
-  // call stack (pile), newest first
   const stack = document.createElement('div');
   stack.className = 'v-stack';
   stack.innerHTML = '<div class="v-stack-title">Call stack (pile)</div>';
   for (let i = frames.length - 1; i >= 0; i--) {
     const d = document.createElement('div');
-    d.textContent = frames[i].label + (frames[i].line ? '  line ' + frames[i].line : '');
+    d.textContent = frames[i].label + (frames[i].line ? ' : ' + frames[i].line : '');
     if (i === frames.length - 1) d.className = 'current';
     stack.appendChild(d);
   }
@@ -245,19 +276,19 @@ function varRow(name, value, changed, heap, prevHeap, depth) {
   const wrap = document.createElement(obj ? 'details' : 'div');
   const head = document.createElement(obj ? 'summary' : 'div');
   head.className = 'v-row' + (changed ? ' changed' : '');
-  head.style.paddingLeft = (depth * 14 + (obj ? 0 : 14)) + 'px';
-  head.innerHTML = `<span class="v-name"></span><span class="v-val"></span>`;
-  head.querySelector('.v-name').textContent = name;
-  head.querySelector('.v-val').textContent = valueText(value, heap);
+  head.style.paddingLeft = (14 + depth * 14 + (obj ? 0 : 14)) + 'px';
+  const n = document.createElement('span'); n.className = 'v-name'; n.textContent = name;
+  const v = document.createElement('span'); v.className = 'v-val'; v.textContent = valueText(value);
+  head.append(n, v);
   wrap.appendChild(head);
   if (obj && depth < 3) {
     if (depth === 0) wrap.open = name !== 'this';
     const before = prevHeap.get(obj.id);
     const children = obj.isArray
-      ? obj.items.map((v, i) => ({ name: `[${i}]`, value: v, prev: before?.items?.[i] }))
+      ? obj.items.map((x, i) => ({ name: `[${i}]`, value: x, prev: before?.items?.[i] }))
       : obj.fields.map(f => ({ name: (f.visibility === 'private' ? '🔒 ' : '') + f.name, value: f.value, prev: before?.fields?.find(x => x.name === f.name)?.value }));
     for (const c of children) {
-      const ch = !!prevHeap.size && (!c.prev || valueText(c.prev) !== valueText(c.value));
+      const ch = prevHeap.size > 0 && (!c.prev || valueText(c.prev) !== valueText(c.value));
       wrap.appendChild(varRow(c.name, c.value, ch, heap, prevHeap, depth + 1));
     }
   }
@@ -266,5 +297,5 @@ function varRow(name, value, changed, heap, prevHeap, depth) {
 
 // ---------- start ----------
 editor.value = EXAMPLES[0].code;
-refreshGutter();
+refreshEditor();
 compileAndRun();

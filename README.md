@@ -39,18 +39,18 @@ Every class becomes a district with its blueprint board, and every `new` builds 
   `jean cannot be resolved to a variable`, `The constructor Etudiant() is undefined`,
   `NullPointerException: Cannot invoke "Etudiant.getNom()" because "jean" is null`, `StackOverflowError`...
 - **Variables view** like the Eclipse debugger (ids, yellow = changed now) and the call stack (pile).
-- **The 3D street** (three.js):
-  - every class is a district with its **blueprint board**: fields, how to build a house (`new`), methods,
-    with 🔒 private, + public, ~ package, S static, F final.
-  - `static` fields live in a shared **kiosk** next to the board.
-  - every object is a **house** that grows when built: its card shows the baskets (fields) and values,
-    a red **lock** if it has private fields, **windows** for its public methods.
-  - a wooden **person** walks to the house where the code runs. Their card shows the method and its
-    variables (signs). **Yellow arrows**: variable ➜ object (pile ➜ tas). **Green arrows**: field ➜ other object.
-  - arrays are rows of numbered **mailboxes**.
-  - bubbles: 🔨 new house built, ↩ value given back, 🖨 console, 🔒 blocked (the lock shakes), ✖ error.
-  - grey house = nobody points at it any more (Garbage Collector).
-  - camera follows the person (Follow), or see everything (Fit all).
+- **The street** (three.js), modern design (v2):
+  - fixed camera angle like a board game: **drag to move, scroll to zoom**, no rotation, you never get lost.
+  - **Focus mode**: only what the current line uses is big; everything else is small and faded (**Show all** to see everything).
+  - every class has its own color and district: a **blueprint stand** (click it to see all fields, constructors, methods
+    with 🔒 private, + public, ~ package, S static, F final) and a **static kiosk** for shared fields.
+  - every object is a rounded **house** that pops up when built: its card shows the fields and values,
+    a red **lock** if it has private fields, **windows** for its public methods, a yellow ring when it is `this`.
+  - a **person** walks to where the code runs and holds the variables. **Amber arrows**: variable → object (pile → tas).
+    **Indigo arrows**: field → other object. Arrays are rows of numbered **mailboxes**.
+  - bubbles for new object, returned value, console, blocked (the lock shakes), errors.
+  - a caption under the street explains each step in one simple sentence.
+- **Dark code editor with Java colors**, Variables and Console in tabs.
 
 Not supported yet (you get a clear message, never a silent failure):
 inheritance (`extends`), interfaces, `ArrayList`, `Scanner`, lambdas.

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OOP Street — see Java objects come alive</title>
-  <meta name="description" content="Write a Java class, run it step by step, and watch it become a 3D street of houses.">
+  <meta name="description" content="Write a Java class, run it step by step, and watch it become a street of houses.">
   <link rel="stylesheet" href="css/style.css">
   <script type="importmap">
     {
@@ -16,69 +16,94 @@
   </script>
 </head>
 <body>
-  <header class="toolbar">
-    <div class="brand">OOP <span>Street</span></div>
-    <label class="field">Example
-      <select id="example"></select>
-    </label>
-    <label class="field" id="main-wrap" hidden>Run main of
-      <select id="main-class"></select>
-    </label>
-    <div class="buttons">
-      <button id="btn-run" class="primary" title="Ctrl+Enter">▶ Run</button>
-      <span class="sep"></span>
-      <button id="btn-reset" title="Go back to the first step">⏮ Reset</button>
-      <button id="btn-back" title="Previous step (←)">◀ Back</button>
-      <button id="btn-step" title="Step Into (F5): enter methods">Step <kbd>F5</kbd></button>
-      <button id="btn-next" title="Step Over (F6): run the whole line">Next line <kbd>F6</kbd></button>
-      <button id="btn-end" title="Run to the end">To end ⏭</button>
+  <header class="topbar">
+    <div class="brand"><span class="logo"></span>OOP Street</div>
+
+    <select id="example" class="select" title="Ready-made examples"></select>
+    <label class="select-wrap" id="main-wrap" hidden>main in <select id="main-class" class="select"></select></label>
+
+    <div class="player">
+      <button id="btn-run" class="btn primary" title="Run again (Ctrl+Enter)">
+        <svg viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z"/></svg>Run
+      </button>
+      <div class="seg">
+        <button id="btn-reset" class="btn icon" title="First step"><svg viewBox="0 0 16 16"><path d="M3 3h1.6v10H3zM14 3v10L5.5 8z"/></svg></button>
+        <button id="btn-back" class="btn icon" title="Back (←)"><svg viewBox="0 0 16 16"><path d="M11 2.5v11L3.5 8z"/></svg></button>
+        <button id="btn-step" class="btn" title="Step into (F5 or →): go inside methods">Step <kbd>F5</kbd></button>
+        <button id="btn-next" class="btn" title="Next line (F6): run the whole line">Next line <kbd>F6</kbd></button>
+        <button id="btn-end" class="btn icon" title="To the end"><svg viewBox="0 0 16 16"><path d="M2 3v10l8.5-5zM11.4 3H13v10h-1.6z"/></svg></button>
+      </div>
+      <div class="progress"><div id="progress-bar"></div></div>
+      <span id="step-count" class="count"></span>
     </div>
-    <div id="step-count" class="step-count"></div>
+
     <div id="status" class="status"></div>
   </header>
 
-  <main class="layout">
-    <section class="panel code-panel">
-      <div class="panel-title">Code <span class="muted">— Java (classes + Launcher)</span></div>
-      <div class="editor">
+  <main class="app">
+    <section class="code-panel">
+      <div class="code-head">
+        <span>Code</span>
+        <span class="hint">Java · classes + Launcher · Ctrl+Enter to run</span>
+      </div>
+      <div class="editor" id="editor">
         <pre id="gutter" class="gutter" aria-hidden="true"></pre>
-        <div class="editor-body">
+        <div class="editor-body" id="editor-body">
           <div id="error-mark" class="mark error"></div>
           <div id="line-mark" class="mark current"></div>
+          <pre id="highlight" class="highlight" aria-hidden="true"></pre>
           <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
         </div>
       </div>
     </section>
 
-    <section class="panel scene-panel">
+    <section class="stage">
       <div id="scene" class="scene"></div>
       <div id="labels" class="labels"></div>
-      <div class="scene-buttons">
-        <button id="btn-follow" class="on" title="The camera follows the person">Follow</button>
-        <button id="btn-fit" title="See the whole street">Fit all</button>
+
+      <div class="stage-tools">
+        <div class="seg">
+          <button id="btn-focus" class="btn on" title="Only what the current line uses is big">Focus</button>
+          <button id="btn-all" class="btn" title="Show everything">Show all</button>
+        </div>
+        <button id="btn-follow" class="btn on" title="The camera follows the person">Follow</button>
+        <div class="seg">
+          <button id="btn-zoom-out" class="btn icon" title="Zoom out">−</button>
+          <button id="btn-zoom-in" class="btn icon" title="Zoom in">+</button>
+        </div>
+        <button id="btn-fit" class="btn" title="See the whole street">Fit all</button>
+        <button id="btn-legend" class="btn icon" title="What do the colors mean?">?</button>
       </div>
-      <div class="legend">
-        <span><i class="sw pile"></i>variable ➜ object (pile ➜ tas)</span>
-        <span><i class="sw heap"></i>field ➜ other object</span>
-        <span>🔒 private · + public · ~ package · S static · F final</span>
+
+      <div class="legend" id="legend" hidden>
+        <span><i class="sw pile"></i>variable → object</span>
+        <span><i class="sw heap"></i>field → object</span>
+        <span><b class="bd lock">🔒</b>private · locked</span>
+        <span><b class="bd pub">+</b>public · open to all</span>
+        <span><b class="bd pkg">~</b>no word · same package</span>
+        <span><b class="bd st">S</b>static · shared by all</span>
+        <span><b class="bd fin">F</b>final · cannot change</span>
+        <span class="muted">Yellow ring = the object <code>this</code></span>
+        <span class="muted">Grey house = nobody points at it</span>
+        <span class="muted">Click a card to open or close it</span>
       </div>
-      <div class="scene-note">Drag to turn · Scroll to zoom · Right-drag to move</div>
+
+      <div class="caption" id="explain"></div>
+      <div class="stage-help">Drag to move · Scroll to zoom</div>
     </section>
 
-    <section class="side">
-      <div class="panel explain-panel">
-        <div class="panel-title">What happens</div>
-        <div id="explain" class="explain"></div>
-      </div>
-      <div class="panel vars-panel">
-        <div class="panel-title">Variables <span class="muted">— yellow = changed in this step</span></div>
+    <aside class="side">
+      <nav class="tabs">
+        <button class="tab on" data-tab="vars">Variables</button>
+        <button class="tab" data-tab="console">Console <span id="console-dot" class="dot" hidden></span></button>
+      </nav>
+      <div class="tab-body" id="tab-vars">
         <div id="variables" class="variables"></div>
       </div>
-      <div class="panel console-panel">
-        <div class="panel-title">Console</div>
+      <div class="tab-body" id="tab-console" hidden>
         <div id="console" class="console"></div>
       </div>
-    </section>
+    </aside>
   </main>
 
   <div class="mobile-note">OOP Street is made for a computer screen. Please open it on a laptop or desktop.</div>
