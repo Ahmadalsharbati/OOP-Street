@@ -1,5 +1,5 @@
 // EXPECT: Cannot invoke "Livre.getTitre()" because "etagere[i]" is null
-// LINE: 19
+// LINE: 20
 class Livre {
     private String titre;
 

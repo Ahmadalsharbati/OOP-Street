@@ -6,7 +6,7 @@ Every class becomes a district with its blueprint board, and every `new` builds 
 > Made by Ahmad Alsharbati while learning Java OOP at ENI École (Rennes).
 > For learners: simple English, real Java, real Eclipse error messages.
 
-**Live version:** https://ahmadalsharbati.github.io/oop-street/
+**Live version:** https://ahmadalsharbati.github.io/OOP-Street/
 
 ---
 
@@ -60,8 +60,8 @@ inheritance (`extends`), interfaces, `ArrayList`, `Scanner`, lambdas.
 No build step. Any static web server works:
 
 ```bash
-git clone https://github.com/Ahmadalsharbati/oop-street.git
-cd oop-street
+git clone https://github.com/Ahmadalsharbati/OOP-Street.git
+cd OOP-Street
 python3 -m http.server 8080
 ```
 
