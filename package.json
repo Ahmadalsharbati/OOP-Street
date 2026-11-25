@@ -1,0 +1,16 @@
+{
+  "name": "oop-street",
+  "version": "1.0.0",
+  "description": "See Java OOP come alive in a 3D street",
+  "scripts": {
+    "test": "node tests/run-tests.mjs",
+    "serve": "npx http-server -p 8080 -c-1 ."
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "type": "module"
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OOP Street — see Java objects come alive</title>
+  <meta name="description" content="Write a Java class, run it step by step, and watch it become a 3D street of houses.">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">OOP <span>Street</span></div>
+    <label class="field">Example
+      <select id="example"></select>
+    </label>
+    <label class="field" id="main-wrap" hidden>Run main of
+      <select id="main-class"></select>
+    </label>
+    <div class="buttons">
+      <button id="btn-run" class="primary" title="Ctrl+Enter">▶ Run</button>
+      <span class="sep"></span>
+      <button id="btn-reset" title="Go back to the first step">⏮ Reset</button>
+      <button id="btn-back" title="Previous step (←)">◀ Back</button>
+      <button id="btn-step" title="Step Into (F5): enter methods">Step <kbd>F5</kbd></button>
+      <button id="btn-next" title="Step Over (F6): run the whole line">Next line <kbd>F6</kbd></button>
+      <button id="btn-end" title="Run to the end">To end ⏭</button>
+    </div>
+    <div id="step-count" class="step-count"></div>
+    <div id="status" class="status"></div>
+  </header>
+
+  <main class="layout">
+    <section class="panel code-panel">
+      <div class="panel-title">Code <span class="muted">— Java (classes + Launcher)</span></div>
+      <div class="editor">
+        <pre id="gutter" class="gutter" aria-hidden="true"></pre>
+        <div class="editor-body">
+          <div id="error-mark" class="mark error"></div>
+          <div id="line-mark" class="mark current"></div>
+          <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" wrap="off"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel scene-panel">
+      <div id="scene" class="scene"></div>
+      <div id="labels" class="labels"></div>
+      <button id="btn-fit" class="fit">Fit all</button>
+      <div class="scene-note">Drag to turn · Scroll to zoom · Right-drag to move</div>
+    </section>
+
+    <section class="side">
+      <div class="panel explain-panel">
+        <div class="panel-title">What happens</div>
+        <div id="explain" class="explain"></div>
+      </div>
+      <div class="panel vars-panel">
+        <div class="panel-title">Variables <span class="muted">— yellow = changed in this step</span></div>
+        <div id="variables" class="variables"></div>
+      </div>
+      <div class="panel console-panel">
+        <div class="panel-title">Console</div>
+        <div id="console" class="console"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="mobile-note">OOP Street is made for a computer screen. Please open it on a laptop or desktop.</div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
