@@ -21,9 +21,9 @@ export function explainStep(step, prevStep) {
       case 'new': lines.push(`new ${e.cls}(...): a new house is built from the ${e.cls} blueprint (id=${e.id}).`); break;
       case 'newArray': lines.push(`A new array is created: ${e.length} boxes of ${e.elemType}, all empty at first.`); break;
       case 'call':
-        if (e.method === '<init>') lines.push(`The constructor of ${e.cls} runs: it fills the baskets of house #${e.thisId}.`);
+        if (e.method === '<init>') lines.push(`The workers build house #${e.thisId}: the constructor of ${e.cls} fills its baskets.`);
         else if (e.static) lines.push(`Call ${e.cls}.${e.method}() on the class itself (static, no object needed).`);
-        else lines.push(`Go to house #${e.thisId} and call ${e.method}().`);
+        else lines.push(`Go to house #${e.thisId}, knock on the window: ${e.method}(${(e.args || []).map(a => val(a.value)).join(', ')}).`);
         break;
       case 'autoToString': lines.push(`println needs text, so Java calls toString() on house #${e.id} by itself.`); break;
       case 'return':
@@ -35,6 +35,11 @@ export function explainStep(step, prevStep) {
       case 'varSet': lines.push(`The variable ${e.name} now holds ${val(e.value)}.`); break;
       case 'arraySet': lines.push(`Box [${e.index}] of array #${e.id} now holds ${val(e.value)}.`); break;
       case 'print': lines.push(`The console prints: ${JSON.stringify(e.text.replace(/\n$/, ''))}`); break;
+      case 'rejected':
+        lines.push(e.field
+          ? `${e.method}(${val(e.value)}) refused the value: ${e.field} stays ${val(e.kept)}.`
+          : `${e.method}(${val(e.value)}) changed nothing.`);
+        break;
       case 'blocked': lines.push(`Blocked! "${e.member}" is ${e.visibility}: it cannot be used from here.`); break;
     }
   }

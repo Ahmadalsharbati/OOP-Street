@@ -22,6 +22,7 @@ let run = null;      // result of runProgram
 let index = 0;       // current step
 let dirty = false;   // code changed since last Run
 let lastOutputLen = 0;
+let autoStep = false;
 
 // ---------- examples ----------
 for (const ex of EXAMPLES) {
@@ -36,13 +37,141 @@ $('example').addEventListener('change', () => {
 
 // ---------- editor ----------
 function refreshEditor() {
-  const n = editor.value.split('\n').length;
-  let s = '';
-  for (let i = 1; i <= n; i++) s += i + '\n';
-  gutter.textContent = s;
+  renderGutter();
   highlight.innerHTML = highlightJava(editor.value) + '\n';
   syncScroll();
 }
+// ---------- clickable line numbers ----------
+// lineSteps: line -> list of step indexes where this line runs
+let lineSteps = new Map();
+let declarations = new Map(); // line -> { kind, cls, name }
+function indexLines() {
+  lineSteps = new Map();
+  declarations = new Map();
+  if (!run) return;
+  run.steps.forEach((st, i) => {
+    if (st.final || !st.line) return;
+    if (!lineSteps.has(st.line)) lineSteps.set(st.line, []);
+    lineSteps.get(st.line).push(i);
+  });
+  for (const c of run.classes || []) {
+    declarations.set(c.line, { kind: 'class', cls: c.name });
+    for (const f of c.fields) if (!lineSteps.has(f.line)) declarations.set(f.line, { kind: 'field', cls: c.name, name: f.name });
+    for (const m of c.methods) declarations.set(m.line, { kind: 'method', cls: c.name, name: m.name, line: m.line });
+    for (const k of c.ctors) declarations.set(k.line, { kind: 'ctor', cls: c.name, name: c.name, line: k.line });
+  }
+}
+function renderGutter() {
+  const n = editor.value.split('\n').length;
+  const current = run && run.steps[index] ? run.steps[index].line : null;
+  const html = [];
+  for (let i = 1; i <= n; i++) {
+    const runs = dirty ? 0 : (lineSteps.get(i) || []).length;
+    const decl = !dirty && declarations.has(i);
+    const cls = ['gl', runs ? 'ran' : decl ? 'decl' : 'never', i === current ? 'now' : ''].join(' ');
+    html.push(`<div class="${cls}" data-line="${i}">${runs > 1 ? `<span class="cnt">×${runs}</span>` : ''}${i}</div>`);
+  }
+  gutter.innerHTML = html.join('');
+  gutter.scrollTop = editor.scrollTop;
+}
+// keep code and line numbers aligned whatever scrolls
+gutter.addEventListener('scroll', () => { if (Math.abs(gutter.scrollTop - editor.scrollTop) > 1) gutter.scrollTop = editor.scrollTop; });
+gutter.addEventListener('wheel', (e) => { editor.scrollTop += e.deltaY; syncScroll(); }, { passive: true });
+gutter.addEventListener('click', (e) => {
+  const el = e.target.closest('.gl');
+  if (!el || !run || dirty) return;
+  goToLine(Number(el.dataset.line));
+});
+function goToLine(line) {
+  stopPlay();
+  const steps = lineSteps.get(line);
+  const decl = declarations.get(line);
+  if (steps && steps.length) {
+    // next time this line runs after the current step (or the first time)
+    const next = steps.find(i => i > index);
+    index = next !== undefined ? next : steps[0];
+    replayLine = line;
+    setFollow(true);
+    show();
+    const k = steps.indexOf(index) + 1;
+    if (steps.length > 1) flashCaption(`Line ${line} runs ${steps.length} times — this is time ${k}. Click the number again for the next one.`);
+    return;
+  }
+  if (decl && (decl.kind === 'method' || decl.kind === 'ctor')) {
+    // a method header: go inside the next call of this method
+    const inside = run.steps.map((st, i) => i).filter(i => {
+      const f = run.steps[i].state.frames;
+      const top = f[f.length - 1];
+      return top && top.startLine === line && (i === 0 || run.steps[i - 1].state.frames.length < f.length);
+    });
+    if (inside.length) {
+      const next = inside.find(i => i > index);
+      index = next !== undefined ? next : inside[0];
+      replayLine = null;
+      setFollow(true);
+      show();
+      flashCaption(`Inside ${decl.kind === 'ctor' ? 'the constructor of ' + decl.cls : decl.name + '()'} — call ${inside.indexOf(index) + 1} of ${inside.length}.`);
+      return;
+    }
+    flashCaption(`${decl.kind === 'ctor' ? 'This constructor' : decl.name + '()'} is never called in this program.`);
+    return;
+  }
+  if (decl) {
+    setFollow(false);
+    scene.showClass(decl.cls, decl.kind === 'field');
+    flashCaption(decl.kind === 'class'
+      ? `class ${decl.cls} is a blueprint: it does not run. Here is its district.`
+      : `This line declares the field ${decl.name} of ${decl.cls}. Every ${decl.cls} house gets this basket.`);
+    return;
+  }
+  flashCaption(`Line ${line} does not run.`);
+}
+function flashCaption(text) {
+  const p = document.createElement('p');
+  p.textContent = text;
+  p.className = 'note';
+  $('explain').appendChild(p);
+}
+
+// ---------- Replay and Play ----------
+let replayLine = null;
+let playTimer = null;
+function stopPlay() {
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+  $('btn-play').classList.remove('on');
+  $('play-icon').innerHTML = '<path d="M4 2.5v11l9-5.5z"/>';
+}
+function play(fromIndex, untilIndex, ms = 850) {
+  stopPlay();
+  if (fromIndex !== null) { index = fromIndex; show(); }
+  $('btn-play').classList.add('on');
+  $('play-icon').innerHTML = '<path d="M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z"/>';
+  playTimer = setInterval(() => {
+    if (index >= Math.min(untilIndex, run.steps.length - 1)) { stopPlay(); return; }
+    index++;
+    show();
+  }, ms);
+}
+function endOfLine(i) {
+  const d = run.steps[i].depth;
+  let j = i + 1;
+  while (j < run.steps.length - 1 && run.steps[j].depth > d) j++;
+  return j;
+}
+$('btn-play').addEventListener('click', () => {
+  if (playTimer) stopPlay();
+  else if (run && run.steps.length) play(index >= run.steps.length - 1 ? 0 : null, Infinity);
+});
+$('btn-replay').addEventListener('click', () => {
+  if (!run || replayLine === null) return;
+  const steps = lineSteps.get(replayLine) || [];
+  const at = steps.includes(index) ? index : steps.filter(i => i <= index).pop();
+  if (at === undefined) return;
+  const keepLine = replayLine;
+  play(Math.max(0, at - 1), endOfLine(at), 950);
+  replayLine = keepLine;
+});
+
 function syncScroll() {
   highlight.scrollTop = editor.scrollTop;
   highlight.scrollLeft = editor.scrollLeft;
@@ -85,6 +214,7 @@ function scrollToLine(line) {
 function compileAndRun() {
   dirty = false;
   scene.reset();
+  scene.setSource(editor.value);
   run = runProgram(editor.value, { mainClass: $('main-class').value || null });
   const sel = $('main-class');
   sel.replaceChildren(...run.mainClasses.map(n => { const o = document.createElement('option'); o.value = o.textContent = n; return o; }));
@@ -92,6 +222,8 @@ function compileAndRun() {
   $('main-wrap').hidden = run.mainClasses.length < 2;
   index = 0;
   lastOutputLen = 0;
+  stopPlay();
+  indexLines();
   setFollow(true);
   show();
 }
@@ -156,6 +288,10 @@ function show() {
   renderVariables(state, prev?.state);
   scene.update(step);
   updateButtons();
+  renderGutter();
+  if (!playTimer && step.line !== replayLine) replayLine = step.final ? null : step.line;
+  $('btn-replay').hidden = !replayLine || !!playTimer;
+  $('replay-line').textContent = replayLine || '';
 }
 
 function updateButtons() {
@@ -165,17 +301,17 @@ function updateButtons() {
   for (const id of ['btn-step', 'btn-next', 'btn-end']) $(id).disabled = !has || index >= run.steps.length - 1;
 }
 
-function stepInto() { if (run && index < run.steps.length - 1) { index++; show(); } }
-function stepOver() {
+function stepInto() { if (playTimer && !autoStep) stopPlay(); if (run && index < run.steps.length - 1) { index++; show(); } }
+function stepOver() { if (playTimer && !autoStep) stopPlay();
   if (!run || index >= run.steps.length - 1) return;
   const d = run.steps[index].depth;
   let j = index + 1;
   while (j < run.steps.length - 1 && run.steps[j].depth > d) j++;
   index = j; show();
 }
-function back() { if (run && index > 0) { index--; show(); } }
-function toEnd() { if (run) { index = run.steps.length - 1; show(); } }
-function reset() { if (run) { index = 0; show(); } }
+function back() { if (playTimer && !autoStep) stopPlay(); if (run && index > 0) { index--; show(); } }
+function toEnd() { if (playTimer && !autoStep) stopPlay(); if (run) { index = run.steps.length - 1; show(); } }
+function reset() { if (playTimer && !autoStep) stopPlay(); if (run) { index = 0; show(); } }
 
 function setFollow(on) { scene.setFollow(on); $('btn-follow').classList.toggle('on', on); }
 function setFocus(on) {
@@ -202,6 +338,7 @@ $('main-class').addEventListener('change', compileAndRun);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); compileAndRun(); return; }
   if (document.activeElement === editor) return;
+  if (e.key === ' ') { e.preventDefault(); $('btn-play').click(); return; }
   if (e.key === 'F5' || e.key === 'ArrowRight') { e.preventDefault(); stepInto(); }
   else if (e.key === 'F6' || e.key === 'ArrowDown') { e.preventDefault(); stepOver(); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }

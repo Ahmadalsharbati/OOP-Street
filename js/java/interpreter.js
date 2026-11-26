@@ -212,7 +212,9 @@ export class Interpreter {
     method.params.forEach((p, i) => {
       frame.scopes[0].set(p.name, { type: p.type, value: this.convertForAssign(args[i], p.type, null, callLine), final: p.final, assigned: true, param: true });
     });
-    this.event({ type: 'call', cls: cls.name, method: method.isCtor ? '<init>' : method.name, thisId: thisObj?.id ?? null, static: !!method.modifiers.static, line: callLine });
+    frame.fieldSets = 0;
+    this.event({ type: 'call', cls: cls.name, method: method.isCtor ? '<init>' : method.name, thisId: thisObj?.id ?? null, static: !!method.modifiers.static, line: callLine,
+      args: method.params.map((p, i) => ({ name: p.name, value: this.describeValue(frame.scopes[0].get(p.name).value) })) });
 
     let result = null;
     if (method.isCtor) {
@@ -221,6 +223,12 @@ export class Interpreter {
       const c = yield* this.execBlockStmts(method.body.stmts, true);
       if (c.type === 'return') result = c.value;
       else yield* this.stop(method.endLine); // the closing "}" — like Eclipse
+    }
+    // a setter that changed nothing: it refused the value (setAge(-3) with an if inside)
+    if (!method.isCtor && thisObj && /^set[A-Z]/.test(method.name) && method.params.length === 1 && frame.fieldSets === 0) {
+      const field = method.name.charAt(3).toLowerCase() + method.name.slice(4);
+      this.event({ type: 'rejected', id: thisObj.id, cls: cls.name, method: method.name, field: thisObj.fields.has(field) ? field : null,
+        value: this.describeValue(args[0]), kept: thisObj.fields.has(field) ? this.describeValue(thisObj.fields.get(field)) : null });
     }
     this.frames.pop();
     this.event({ type: 'return', cls: cls.name, method: method.isCtor ? '<init>' : method.name, thisId: thisObj?.id ?? null, value: result ? this.describeValue(result) : null });
@@ -994,6 +1002,7 @@ export class Interpreter {
           obj.finalAssigned.add(f.name);
         }
         obj.fields.set(f.name, v);
+        for (const fr of this.frames) if (fr.thisObj === obj) fr.fieldSets = (fr.fieldSets || 0) + 1;
         this.event({ type: 'fieldSet', id: obj.id, field: f.name, value: this.describeValue(v) });
       },
       type: f.type,
@@ -1382,7 +1391,13 @@ export class Interpreter {
           vars.push({ name, type: typeName(v.type), value: v.assigned ? this.describeValue(v.value) : { kind: 'unset' } });
         }
       }
-      return { id: f.id, label: f.label, cls: f.cls?.name, line: f.line, thisId: f.thisObj?.id ?? null, isStatic: f.isStatic, vars };
+      const m = f.method;
+      return {
+        id: f.id, label: f.label, cls: f.cls?.name, line: f.line, thisId: f.thisObj?.id ?? null, isStatic: f.isStatic, vars,
+        // which code this frame runs (for the code card next to the person)
+        isCtor: m ? !!m.isCtor : (!!f.thisObj && !f.isStatic),
+        startLine: m ? m.line : null, endLine: m ? m.endLine : null,
+      };
     });
 
     const reachable = this.reachableIds();

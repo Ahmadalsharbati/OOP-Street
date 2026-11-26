@@ -21,6 +21,7 @@ import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/addons/RoundedBoxGeometry.js';
 import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { computeLayout, visibleArrays, BOX } from '../layout/layout.js';
+import { highlightJava } from '../ui/highlight.js';
 
 // one soft color per class (in order of appearance)
 const CLASS_COLORS = [0x6c8cff, 0xf28b6b, 0x4cc3a3, 0xb07cf0, 0xf2b84b, 0xef7fb0, 0x5fb3e8, 0x9bc45a];
@@ -195,6 +196,9 @@ export class StreetScene {
     this.personTargets = null;
   }
 
+  // the program's source, for the code card next to the person
+  setSource(text) { this.sourceLines = text.split('\n'); }
+
   colorOf(cls) {
     if (!this.classColor.has(cls)) this.classColor.set(cls, CLASS_COLORS[this.classColor.size % CLASS_COLORS.length]);
     return this.classColor.get(cls);
@@ -211,13 +215,14 @@ export class StreetScene {
     const events = step.events || [];
     const top = state.frames[state.frames.length - 1] || null;
 
-    const touched = { set: new Set(), get: new Set(), blocked: new Set(), staticSet: new Set(), arraySet: new Set() };
+    const touched = { set: new Set(), get: new Set(), blocked: new Set(), staticSet: new Set(), arraySet: new Set(), rejected: new Set() };
     for (const e of events) {
       if (e.type === 'fieldSet') touched.set.add(e.id + '.' + e.field);
       if (e.type === 'fieldGet') touched.get.add(e.id + '.' + e.field);
       if (e.type === 'blocked') touched.blocked.add((e.id ?? e.cls) + '.' + e.member);
       if (e.type === 'staticSet') touched.staticSet.add(e.cls + '.' + e.field);
       if (e.type === 'arraySet') touched.arraySet.add(e.id + '.' + e.index);
+      if (e.type === 'rejected' && e.field) touched.rejected.add(e.id + '.' + e.field);
     }
     const rel = this.relevance(state, top, events);
 
@@ -228,6 +233,7 @@ export class StreetScene {
     this.buildHeapArrows(L, state, rel);
     this.placePerson(L, state, top, step);
     this.addBubbles(L, step, events);
+    this.addCodeCard(L, state, top);
 
     if (!this.fitted) { this.focusView(); this.fitted = true; }
     else if (this.follow) this.followGoal();
@@ -313,6 +319,9 @@ export class StreetScene {
   // ---------- houses ----------
   buildHouses(L, state, top, touched, rel) {
     const activeId = top ? top.thisId : null;
+    const events = this.lastStep.events || [];
+    this.knockIds = new Set(events.filter(e => e.type === 'call' && e.method !== '<init>' && e.thisId !== null).map(e => e.thisId));
+    if (this.knockIds.size) this.person.userData.knock = 1;
     const seen = new Set();
     this.ring.visible = false;
     for (const o of state.heap) {
@@ -335,6 +344,14 @@ export class StreetScene {
       const on = rel.obj(o.id);
       styleHouse(g, color, { ghost: !o.reachable, dim: !on });
       if ([...touched.blocked].some(k => k.startsWith(o.id + '.'))) g.userData.shake = 1;
+      // the workers are here while one of its constructors runs; the roof goes on at the end
+      const building = state.frames.some(f => f.isCtor && f.thisId === o.id);
+      if (g.userData.building && !building) g.userData.roofDrop = 1;
+      g.userData.building = building;
+      g.getObjectByName('roof').visible = !building;
+      g.getObjectByName('workers').visible = building;
+      // knock on the window when one of its methods is called
+      if (this.knockIds.has(o.id)) g.userData.knock = 1;
       if (o.id === activeId) { this.ring.visible = true; this.ring.position.set(pos.x, 0.32, pos.z); }
 
       const html = on ? houseCard(o, cls, { active: o.id === activeId, touched, color })
@@ -469,6 +486,14 @@ export class StreetScene {
     let n = 0;
     for (const e of events) {
       if (n > 3) break;
+      if (e.type === 'call' && e.method !== '<init>' && e.thisId !== null && at(e.thisId)) {
+        const args = (e.args || []).map(a => valText(a.value)).join(', ');
+        this.addLabel(at(e.thisId), `<div class="bubble knock">knock knock · .${esc(e.method)}(${esc(args)})</div>`, 'bubble'); n++;
+      }
+      if (e.type === 'rejected' && at(e.id)) {
+        const msg = e.field ? `${e.method}(${valText(e.value)}) refused · ${e.field} stays ${valText(e.kept)}` : `${e.method}(${valText(e.value)}) changed nothing`;
+        this.addLabel(at(e.id).add(new THREE.Vector3(0, 0, 1.2)), `<div class="bubble refused">✋ ${esc(msg)}</div>`, 'bubble', null, 2); n++;
+      }
       if (e.type === 'new' && at(e.id)) { this.addLabel(at(e.id), `<div class="bubble build">new ${esc(e.cls)} · house #${e.id} built</div>`, 'bubble'); n++; }
       if (e.type === 'return' && e.method !== '<init>' && e.value && e.value.kind !== 'none') {
         const p = e.thisId !== null ? at(e.thisId) : null;
@@ -488,6 +513,36 @@ export class StreetScene {
       const msg = step.error.kind === 'exception' ? step.error.javaClass.replace(/^java\.(lang|util)\./, '') : step.error.message;
       this.addLabel(new THREE.Vector3(), `<div class="bubble error big">${esc(msg)}</div>`, 'bubble', () => this.person.position.clone().add(new THREE.Vector3(0, 0, 1.4)), 1);
     }
+  }
+
+  // ---------- the code of the method we are inside (next to its house) ----------
+  addCodeCard(L, state, top) {
+    if (!top || state.frames.length < 2 || !top.startLine || !this.sourceLines) return;
+    const first = top.startLine, last = Math.min(top.endLine, this.sourceLines.length);
+    // long methods: show a window of 14 lines around the current line
+    let a = first, b = last;
+    if (b - a + 1 > 14) {
+      a = Math.max(first, Math.min(top.line - 6, last - 13));
+      b = a + 13;
+    }
+    const minIndent = Math.min(...this.sourceLines.slice(a - 1, b).filter(l => l.trim()).map(l => l.match(/^\s*/)[0].length));
+    const rows = [];
+    for (let n = a; n <= b; n++) {
+      const text = (this.sourceLines[n - 1] || '').slice(minIndent) || ' ';
+      rows.push(`<div class="cl${n === top.line ? ' now' : ''}"><i>${n}</i><span>${highlightJava(text)}</span></div>`);
+    }
+    let pos;
+    const h = top.thisId !== null ? L.houses.get(top.thisId) : null;
+    let alt;
+    if (h) { pos = new THREE.Vector3(h.x + 2.8 * S, 2.6 * S, h.z); alt = new THREE.Vector3(h.x - 2.8 * S, 2.6 * S, h.z); }
+    else {
+      const d = L.districts.find(x => x.kind === 'class' && x.name === top.cls);
+      pos = d ? new THREE.Vector3(d.board.x + 3.5 * S, 2.6 * S, d.board.z + 2) : this.person.position.clone();
+    }
+    const title = top.isCtor ? 'constructor' : shortLabel(top.label);
+    this.addLabel(pos, `<div class="codecard"><div class="ct">${esc(title)}<span>inside</span></div>${a > first ? '<div class="cl more">…</div>' : ''}${rows.join('')}${b < last ? '<div class="cl more">…</div>' : ''}</div>`, 'code', null, 4, 'left');
+    // not enough room on the right of the house: show it on the left
+    if (alt) this.labels[this.labels.length - 1].alt = alt;
   }
 
   // ===================== camera =====================
@@ -526,6 +581,18 @@ export class StreetScene {
     if (on) this.followGoal(); else this.cameraGoal = null;
   }
 
+  // go to a class district (from a click on its line in the code)
+  showClass(name, openBoard) {
+    const d = this.layout?.districts.find(x => x.kind === 'class' && x.name === name);
+    if (!d) return;
+    if (openBoard) this.openBoards.add(name);
+    this.follow = false;
+    this.cameraGoal = new THREE.Vector3(d.board.x + 6, 0, d.board.z + 2);
+    if (this.lastStep) this.update(this.lastStep);
+    this.follow = false;
+    this.cameraGoal = new THREE.Vector3(d.board.x + 6, 0, d.board.z + 2);
+  }
+
   setFocus(on) {
     this.focus = on;
     if (this.lastStep) this.update(this.lastStep);
@@ -546,6 +613,21 @@ export class StreetScene {
         g.scale.setScalar(Math.max(0.01, s) * S);
       }
       if (g.userData.target) g.position.lerp(g.userData.target, 0.15);
+      // windows light up when someone knocks
+      const k = g.userData.knock || 0;
+      for (const w of g.children) {
+        if (w.name === 'window') w.material.emissiveIntensity = 0.35 + k * (1.4 + Math.sin(now / 60) * 0.6);
+      }
+      if (k > 0) g.userData.knock = Math.max(0, k - 0.012);
+      // the roof drops on when the constructor is finished
+      const roof = g.getObjectByName('roof');
+      if (g.userData.roofDrop > 0) {
+        g.userData.roofDrop = Math.max(0, g.userData.roofDrop - 0.04);
+        roof.position.y = 1.85 + 2.5 * g.userData.roofDrop * g.userData.roofDrop;
+      } else roof.position.y = 1.85;
+      // workers hammer
+      const workers = g.getObjectByName('workers');
+      if (workers.visible) workers.children.forEach((w, i) => { w.position.y = Math.abs(Math.sin(now / 160 + i * 1.7)) * 0.25; });
       const lock = g.getObjectByName('lock');
       if (lock) {
         if (g.userData.shake > 0) {
@@ -569,6 +651,10 @@ export class StreetScene {
         this.person.position.y = 0.3 + Math.abs(Math.sin(now / 80)) * 0.3 * Math.min(1, moved * 8);
         this.rebuildPersonArrows();
         this.walking = true;
+      } else if (this.person.userData.knock > 0) {
+        // a little knock movement: lean toward the house
+        this.person.userData.knock = Math.max(0, this.person.userData.knock - 0.03);
+        this.person.rotation.x = -Math.sin(this.person.userData.knock * Math.PI * 4) * 0.18;
       } else if (this.walking) {
         this.walking = false;
         this.person.position.y = 0.3;
@@ -606,8 +692,14 @@ export class StreetScene {
       v.copy(l.getPos ? l.getPos() : l.pos).project(this.camera);
       if (v.x < -1.3 || v.x > 1.3 || v.y < -1.3 || v.y > 1.3) { l.el.style.display = 'none'; continue; }
       l.el.style.display = '';
-      const x = Math.round((v.x + 1) / 2 * w), y = Math.round((1 - v.y) / 2 * h);
-      const [dx, dy] = l.anchor === 'left' ? ['0%', '-100%'] : l.anchor === 'below' ? ['-50%', '14px'] : ['-50%', '-100%'];
+      let x = Math.round((v.x + 1) / 2 * w), y = Math.round((1 - v.y) / 2 * h);
+      let anchor = l.anchor;
+      if (l.alt && x + l.el.offsetWidth > w - 8) {
+        v.copy(l.alt).project(this.camera);
+        x = Math.round((v.x + 1) / 2 * w); y = Math.round((1 - v.y) / 2 * h);
+        anchor = 'right';
+      }
+      const [dx, dy] = anchor === 'left' ? ['0%', '-100%'] : anchor === 'right' ? ['-100%', '-100%'] : anchor === 'below' ? ['-50%', '14px'] : ['-50%', '-100%'];
       l.el.style.transform = `translate(${x}px, ${y}px) translate(${dx}, ${dy})`;
       const k = l.el.classList;
       const base = k.contains('label-bubble') ? 8000 : k.contains('label-person') ? 7000 : k.contains('label-house') || k.contains('label-board') ? 3000 : 0;
@@ -682,7 +774,7 @@ function houseCard(o, cls, { active, touched, color }) {
   const rows = o.fields.map(f => {
     const meta = cls.fields.find(x => x.name === f.name) || f;
     const key = o.id + '.' + f.name;
-    const st = touched.blocked.has(key) ? ' blocked' : touched.set.has(key) ? ' set' : touched.get.has(key) ? ' get' : '';
+    const st = touched.blocked.has(key) ? ' blocked' : touched.rejected.has(key) ? ' rejected' : touched.set.has(key) ? ' set' : touched.get.has(key) ? ' get' : '';
     return `<div class="row${st}">${badges(meta)}<span class="n">${esc(f.name)}</span><span class="v">${esc(valText(f.value))}</span></div>`;
   }).join('');
   const gc = o.reachable ? '' : '<div class="hint">Nobody points here → Garbage Collector</div>';
@@ -759,6 +851,25 @@ function makeHouse(cls, color) {
     const win = new THREE.Mesh(new RoundedBoxGeometry(0.46, 0.46, 0.1, 2, 0.08), mat(UI.window, { emissive: 0xffe27a, emissiveIntensity: 0.35 }));
     win.position.set(0.05 + i * 0.56, 1.15, 1.29); win.name = 'window'; g.add(win);
   }
+  // two small workers with yellow helmets (visible while the constructor runs)
+  const workers = new THREE.Group();
+  workers.name = 'workers';
+  workers.visible = false;
+  for (const [x, z] of [[-1.9, 0.4], [1.9, -0.6]]) {
+    const w = new THREE.Group();
+    const b = shadowed(new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.35, 6, 12), mat(0x3b82f6, { roughness: 0.6 })));
+    b.position.y = 0.45; w.add(b);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 12), mat(UI.personSkin));
+    head.position.y = 0.92; w.add(head);
+    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xfacc15, { roughness: 0.4 }));
+    helmet.position.y = 0.98; w.add(helmet);
+    const hammer = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.08), mat(0x6b4f3a));
+    hammer.position.set(0.25, 0.75, 0); hammer.rotation.z = -0.6; w.add(hammer);
+    w.position.set(x, 0, z);
+    workers.add(w);
+  }
+  g.add(workers);
+
   if (cls && cls.fields.some(f => f.visibility === 'private' && !f.static)) {
     const lock = new THREE.Group();
     lock.name = 'lock';

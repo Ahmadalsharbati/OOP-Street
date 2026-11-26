@@ -29,6 +29,7 @@
       <div class="seg">
         <button id="btn-reset" class="btn icon" title="First step"><svg viewBox="0 0 16 16"><path d="M3 3h1.6v10H3zM14 3v10L5.5 8z"/></svg></button>
         <button id="btn-back" class="btn icon" title="Back (←)"><svg viewBox="0 0 16 16"><path d="M11 2.5v11L3.5 8z"/></svg></button>
+        <button id="btn-play" class="btn icon" title="Play / pause (Space)"><svg viewBox="0 0 16 16" id="play-icon"><path d="M4 2.5v11l9-5.5z"/></svg></button>
         <button id="btn-step" class="btn" title="Step into (F5 or →): go inside methods">Step <kbd>F5</kbd></button>
         <button id="btn-next" class="btn" title="Next line (F6): run the whole line">Next line <kbd>F6</kbd></button>
         <button id="btn-end" class="btn icon" title="To the end"><svg viewBox="0 0 16 16"><path d="M2 3v10l8.5-5zM11.4 3H13v10h-1.6z"/></svg></button>
@@ -47,7 +48,7 @@
         <span class="hint">Java · classes + Launcher · Ctrl+Enter to run</span>
       </div>
       <div class="editor" id="editor">
-        <pre id="gutter" class="gutter" aria-hidden="true"></pre>
+        <div id="gutter" class="gutter" title="Click a line number: go to the moment this line runs"></div>
         <div class="editor-body" id="editor-body">
           <div id="error-mark" class="mark error"></div>
           <div id="line-mark" class="mark current"></div>
@@ -93,7 +94,10 @@
         <span class="muted">Click a card to open or close it</span>
       </div>
 
-      <div class="caption" id="explain"></div>
+      <div class="caption-wrap">
+        <button id="btn-replay" class="btn replay" hidden title="Play this line again, slowly">↻ Replay line <b id="replay-line"></b></button>
+        <div class="caption" id="explain"></div>
+      </div>
       <div class="stage-help">Drag to move · Scroll to zoom</div>
     </section>
 

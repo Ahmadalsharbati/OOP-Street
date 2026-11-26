@@ -100,9 +100,18 @@ body.resizing .scene canvas { pointer-events: none; }
 .code-head .hint { color: #646b80; font-weight: 450; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 12px; }
 .editor { flex: 1; display: flex; min-height: 0; font-family: var(--mono); font-size: 13px; line-height: 21px; }
 .gutter {
-  margin: 0; padding: 10px 10px 10px 0; width: 46px; text-align: right; color: var(--code-gutter);
+  margin: 0; padding: 10px 0; width: 62px; text-align: right; color: var(--code-gutter);
   overflow: hidden; user-select: none; font: inherit; line-height: inherit; flex: none;
 }
+.gl { height: 21px; padding-right: 10px; cursor: pointer; display: flex; justify-content: flex-end; align-items: center; gap: 5px; border-radius: 0 6px 6px 0; }
+.gl:hover { background: #232733; color: #c9cede; }
+.gl.ran { color: #7a8196; }
+.gl.never { cursor: default; }
+.gl.decl { cursor: pointer; }
+.gl .cnt { font-size: 9.5px; color: #16181f; background: #8b93a7; border-radius: 6px; padding: 0 4px; line-height: 14px; font-weight: 700; }
+.gl.now { color: #facc15; }
+.gl.now .cnt { background: #facc15; }
+.gl .gone { flex: 1; }
 .editor-body { position: relative; flex: 1; min-width: 0; overflow: hidden; }
 .highlight, textarea {
   position: absolute; inset: 0; margin: 0; padding: 10px 12px; border: 0; outline: 0;
@@ -147,14 +156,20 @@ textarea::selection { background: rgba(120, 140, 255, 0.35); }
 .legend .muted { color: var(--muted); }
 .legend code { font-family: var(--mono); font-size: 11px; }
 
-.caption {
+.caption-wrap {
   position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20000;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: min(720px, 90%); width: max-content;
+}
+.btn.replay { box-shadow: var(--shadow); border-color: #facc15; }
+.btn.replay b { font-family: var(--mono); font-weight: 700; }
+.caption {
   max-width: min(720px, 90%); background: rgba(29, 34, 48, 0.93); color: #fff; border-radius: 14px;
   padding: 10px 18px; font-size: 14.5px; line-height: 1.45; text-align: center; box-shadow: 0 8px 30px rgba(16, 24, 40, 0.25);
 }
 .caption:empty { display: none; }
 .caption p { margin: 0; }
 .caption p + p { margin-top: 3px; color: #c9cede; font-size: 13.5px; }
+.caption p.note { color: #facc15; font-size: 13px; }
 .caption.error { background: rgba(190, 38, 46, 0.96); }
 .caption.error p + p { color: #ffd9da; }
 .stage-help { position: absolute; top: 18px; left: 16px; font-size: 11.5px; color: var(--muted); z-index: 20000; pointer-events: none; }
@@ -278,3 +293,21 @@ details[open] > summary.v-row::before { transform: rotate(90deg); }
 @media (max-width: 900px) {
   .mobile-note { display: block; position: fixed; inset: auto 0 0 0; padding: 12px; background: var(--amber-soft); text-align: center; font-size: 14px; }
 }
+
+/* phase 4 */
+.card .row.rejected { background: #fff1e6; }
+.card .row.rejected .v { color: #c2410c; }
+.bubble.knock { background: #fff; color: var(--ink); font-family: var(--mono); font-size: 12px; border: 1.5px solid #facc15; }
+.bubble.refused { background: #ea580c; color: white; }
+
+.codecard {
+  background: #16181f; color: #e3e6ee; border-radius: 11px; padding: 6px 0 7px; min-width: 220px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 18px; box-shadow: 0 10px 30px rgba(16, 24, 40, 0.28);
+}
+.codecard .ct { display: flex; gap: 8px; align-items: center; padding: 0 12px 5px; color: #fff; font-weight: 700; border-bottom: 1px solid #262a35; margin-bottom: 4px; }
+.codecard .ct span { margin-left: auto; color: #646b80; font-weight: 500; font-family: var(--sans); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+.codecard .cl { display: flex; gap: 10px; padding: 0 12px 0 8px; white-space: pre; }
+.codecard .cl i { font-style: normal; color: #4a5063; width: 22px; text-align: right; flex: none; }
+.codecard .cl.now { background: rgba(250, 204, 21, 0.18); box-shadow: inset 3px 0 0 #facc15; }
+.codecard .cl.now i { color: #facc15; }
+.codecard .cl.more { color: #4a5063; padding-left: 40px; }

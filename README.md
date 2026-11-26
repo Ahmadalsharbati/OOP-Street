@@ -51,6 +51,16 @@ Every class becomes a district with its blueprint board, and every `new` builds 
   - bubbles for new object, returned value, console, blocked (the lock shakes), errors.
   - a caption under the street explains each step in one simple sentence.
 - **Dark code editor with Java colors**, Variables and Console in tabs.
+- **Drag the handles** between the code, the street and the panel to resize them (double-click to hide), or press the
+  "big street" button.
+- **Phase 4 — the street reacts to every call:**
+  - the person **knocks on the window** of the house before a method runs, and the windows light up;
+  - during `new`, **workers** build the house and fill its baskets; the **roof goes on** when the constructor ends;
+  - when you step inside a method, a **code card** next to the house shows that method with the current line;
+  - a setter that **refuses** a value (like `setAge(-3)` with an `if`) shows it: the value comes back, the field stays.
+- **Click a line number** to jump to the moment that line runs. `×3` next to the number = it runs 3 times;
+  click again for the next time. Click a class or field line to fly to its district. **Replay** plays the line again slowly,
+  **Play** (or Space) runs the program by itself.
 
 Not supported yet (you get a clear message, never a silent failure):
 inheritance (`extends`), interfaces, `ArrayList`, `Scanner`, lambdas.
@@ -106,7 +116,7 @@ vendor/three/           three.js (MIT license), no CDN needed
 1. ✅ Setup: repository, structure, three.js, GitHub Pages
 2. ✅ The generic interpreter + tests against the real JVM
 3. ✅ The 3D street: baskets, locks, windows, people with signs, camera that follows the line
-4. Connect every step to the street: new / get / set / private / public, Step Into, errors in the scene
+4. ✅ Connect every step to the street: knock, workers, code card, refused setter, clickable lines, Replay / Play
 5. Associations and arrays (Livre → Auteur, Etudiant ⇄ Classe) and a live UML diagram
 6. static, final, pile/tas, Garbage Collector, null
 7. Course examples, "Try the bug", Challenge mode, big exercises (10+ classes)
