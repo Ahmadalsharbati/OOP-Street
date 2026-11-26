@@ -7,7 +7,7 @@
 // Arrays get their own district: rows of numbered mailboxes.
 // The world grows by itself when more classes or objects appear.
 
-export const DISTRICT = { width: 30, gap: 7, backDepth: 10, frontPad: 4 };
+export const DISTRICT = { width: 30, gap: 16, backDepth: 10, frontPad: 4 };
 // district: [ stand + kiosk | houses ]
 export const HOUSE = { width: 4.5, spacingX: 9, spacingZ: 9.5, perRow: 2 };
 export const BOX = { size: 1.1, gap: 0.15, maxShown: 10, rowGap: 3.2 };

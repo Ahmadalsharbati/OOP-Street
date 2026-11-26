@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/addons/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/RoomEnvironment.js';
 import { computeLayout, visibleArrays, BOX } from '../layout/layout.js';
 
 // one soft color per class (in order of appearance)
@@ -44,7 +45,8 @@ export class StreetScene {
     this.classColor = new Map();
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // render at a higher resolution than the screen (supersampling): smoother edges
+    renderer.setPixelRatio(Math.min(Math.max(window.devicePixelRatio, 1) * 1.5, 3));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
@@ -55,6 +57,10 @@ export class StreetScene {
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(UI.bg);
+    // soft studio reflections on every surface (much nicer shading than lights alone)
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environmentIntensity = 0.35;
     this.scene = scene;
 
     // orthographic camera = no perspective stretching, like a clean isometric game
@@ -81,10 +87,10 @@ export class StreetScene {
     this.controls = controls;
 
     // soft studio light
-    scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe3ec, 2.0));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xdfe3ec, 1.2));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.radius = 10;
     sun.shadow.blurSamples = 16;
     sun.shadow.bias = -0.0004;
@@ -131,14 +137,41 @@ export class StreetScene {
       if (this.lastStep) this.update(this.lastStep);
     });
 
+    // Quality adapts to the computer: start high, go down if frames are slow.
+    this.quality = 2; // 2 = high (supersampled), 1 = normal, 0 = light
+    this.frameTimes = [];
     const loop = () => {
+      const t0 = performance.now();
       this.controls.update();
       this.animate();
       renderer.render(scene, this.camera);
       this.updateLabels();
+      this.measure(performance.now() - t0);
       requestAnimationFrame(loop);
     };
     loop();
+  }
+
+  measure(ms) {
+    this.frameTimes.push(ms);
+    if (this.frameTimes.length < 20) return;
+    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    this.frameTimes = [];
+    if (avg > 28 && this.quality > 0) this.setQuality(this.quality - 1);
+  }
+
+  setQuality(q) {
+    this.quality = q;
+    const dpr = Math.max(window.devicePixelRatio, 1);
+    this.renderer.setPixelRatio(q === 2 ? Math.min(dpr * 1.5, 3) : q === 1 ? Math.min(dpr, 2) : 1);
+    const size = q === 2 ? 4096 : q === 1 ? 2048 : 1024;
+    if (this.sun.shadow.mapSize.x !== size) {
+      this.sun.shadow.mapSize.set(size, size);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.sun.shadow.blurSamples = q === 2 ? 16 : 8;
+    this.resize();
   }
 
   resize() {
@@ -343,35 +376,36 @@ export class StreetScene {
   // ---------- indigo arrows: field / array box → object ----------
   buildHeapArrows(L, state, rel) {
     clearGroup(this.arrowGroup);
-    const targetPoint = (id) => {
+    const HOUSE_R = 1.9 * S;
+    const target = (id) => {
       const h = L.houses.get(id);
-      if (h) return new THREE.Vector3(h.x, 2.0 * S, h.z);
+      if (h) return { p: new THREE.Vector3(h.x, 0, h.z), gap: HOUSE_R };
       const a = L.arrayPos.get(id);
-      if (a && a.boxes.length) return new THREE.Vector3(a.boxes[0].x - BOX.size / 2, 0.9, a.z);
+      if (a && a.boxes.length) return { p: new THREE.Vector3(a.boxes[0].x, 0, a.z), gap: 0.9 };
       return null;
     };
     for (const o of state.heap) {
-      const on = rel.obj(o.id);
-      if (o.isArray) {
-        const p = L.arrayPos.get(o.id);
-        if (!p) continue;
-        for (const b of p.boxes) {
+      if (!o.reachable && this.focus) continue;
+      const from = L.houses.get(o.id);
+      const arr = L.arrayPos.get(o.id);
+      if (o.isArray && arr) {
+        arr.boxes.forEach(b => {
           const v = o.items[b.index];
-          if (v.kind !== 'object' && v.kind !== 'array') continue;
-          const to = targetPoint(v.id);
-          if (to) this.arrowGroup.add(makeArrow(new THREE.Vector3(b.x, 1.1, b.z), to, UI.heapArrow, on ? 0.06 : 0.035, on ? 0.9 : 0.22));
+          if (v.kind !== 'object' && v.kind !== 'array') return;
+          if (!rel.obj(o.id) && !rel.obj(v.id)) return;
+          const t = target(v.id);
+          if (t) this.arrowGroup.add(makeArrow(new THREE.Vector3(b.x, 0, b.z + 0.6), t.p, UI.heapArrow, 0.22, 0.75, t.gap, 0.12));
+        });
+      } else if (from) {
+        let k = 0;
+        for (const f of o.fields) {
+          if ((f.value.kind !== 'object' && f.value.kind !== 'array') || f.value.id === o.id) continue;
+          if (!rel.obj(o.id) && !rel.obj(f.value.id)) continue;
+          const t = target(f.value.id);
+          if (!t) continue;
+          const start = new THREE.Vector3(from.x + (k++ - 0.5) * 0.9, 0, from.z + HOUSE_R * 0.6);
+          this.arrowGroup.add(makeArrow(start, t.p, UI.heapArrow, 0.22, 0.75, t.gap, 0.2));
         }
-        continue;
-      }
-      const h = L.houses.get(o.id);
-      if (!h) continue;
-      let k = 0;
-      for (const f of o.fields) {
-        if ((f.value.kind !== 'object' && f.value.kind !== 'array') || f.value.id === o.id) continue;
-        const to = targetPoint(f.value.id);
-        if (!to) continue;
-        const from = new THREE.Vector3(h.x + (0.7 - (k++) * 0.45) * S, 1.9 * S, h.z + 0.3);
-        this.arrowGroup.add(makeArrow(from, to, UI.heapArrow, on ? 0.06 : 0.035, on && o.reachable ? 0.9 : 0.22));
       }
     }
   }
@@ -410,9 +444,9 @@ export class StreetScene {
 
     this.personTargets = top.vars.filter(v => v.value.kind === 'object' || v.value.kind === 'array').map(v => {
       const h = L.houses.get(v.value.id);
-      if (h) return new THREE.Vector3(h.x, 2.6 * S, h.z);
+      if (h) return { p: new THREE.Vector3(h.x, 0, h.z), gap: 1.9 * S };
       const a = L.arrayPos.get(v.value.id);
-      if (a) return new THREE.Vector3(a.x, 1.1, a.z);
+      if (a && a.boxes.length) return { p: new THREE.Vector3(a.boxes[0].x, 0, a.z), gap: 0.9 };
       return null;
     }).filter(Boolean);
     this.rebuildPersonArrows();
@@ -421,10 +455,10 @@ export class StreetScene {
   rebuildPersonArrows() {
     clearGroup(this.personArrows);
     if (!this.person.visible || !this.personTargets) return;
-    const hand = this.person.position.clone().add(new THREE.Vector3(0.55 * S, 1.95 * S, 0.1));
+    const feet = this.person.position.clone();
     for (const t of this.personTargets) {
-      if (t.distanceTo(hand) < 1.6) continue;
-      this.personArrows.add(makeArrow(hand, t, UI.pileArrow, 0.07, 1));
+      if (t.p.distanceTo(new THREE.Vector3(feet.x, 0, feet.z)) < t.gap + 0.8) continue;
+      this.personArrows.add(makeArrow(feet, t.p, UI.pileArrow, 0.3, 0.9, t.gap, -0.15));
     }
   }
 
@@ -468,9 +502,9 @@ export class StreetScene {
   fitAll() {
     if (!this.layout) return;
     const w = this.container.clientWidth, h = this.container.clientHeight;
-    const span = Math.max(this.layout.width * (h / w) * 1.05, this.layout.depth * 0.85) + 10;
+    const span = (Math.max(this.layout.width * (h / w) * 1.05, this.layout.depth * 0.85) + 10) * 1.15;
     this.cameraGoal = null;
-    this.lookAt(new THREE.Vector3(0, 0, 0));
+    this.lookAt(new THREE.Vector3(0, 0, -3)); // a bit up: the cards stand above the houses
     this.setZoom(Math.max(0.35, Math.min(1.4, this.viewSize / span)));
   }
 
@@ -712,7 +746,7 @@ function gableRoof(w, d, h) {
 
 function makeHouse(cls, color) {
   const g = new THREE.Group();
-  const body = shadowed(new THREE.Mesh(new RoundedBoxGeometry(2.8, 1.9, 2.6, 4, 0.28), mat(tint(color, 0.82))));
+  const body = shadowed(new THREE.Mesh(new RoundedBoxGeometry(2.8, 1.9, 2.6, 4, 0.28), mat(tint(color, 0.7))));
   body.position.y = 0.95; body.name = 'body'; g.add(body);
   const roof = shadowed(new THREE.Mesh(gableRoof(3.1, 2.7, 1.15), mat(color, { roughness: 0.55 })));
   roof.position.y = 1.85; roof.name = 'roof'; g.add(roof);
@@ -741,7 +775,7 @@ function makeHouse(cls, color) {
 
 function styleHouse(g, color, { ghost, dim }) {
   const body = g.getObjectByName('body'), roof = g.getObjectByName('roof');
-  body.material.color.setHex(ghost ? UI.ghost : tint(color, 0.82));
+  body.material.color.setHex(ghost ? UI.ghost : tint(color, 0.7));
   roof.material.color.setHex(ghost ? tint(UI.ghost, -0.1) : color);
   const a = dim || ghost ? 0.4 : 1;
   g.traverse(o => {
@@ -788,17 +822,60 @@ function makeRing() {
   return ring;
 }
 
-function makeArrow(a, b, color, radius, opacity) {
+// A flat arrow drawn on the ground, like a painted path: it never hides houses or cards.
+// a, b: start and end (y is ignored). endGap: stop before the target (house border).
+function makeArrow(a, b, color, width, opacity, endGap = 0, bend = 0.18) {
   const g = new THREE.Group();
-  const mid = a.clone().add(b).multiplyScalar(0.5);
-  mid.y = Math.max(a.y, b.y) + 0.8 + a.distanceTo(b) * 0.15;
-  const curve = new THREE.QuadraticBezierCurve3(a.clone(), mid, b.clone());
-  const m = new THREE.MeshStandardMaterial({ color, roughness: 0.5, transparent: opacity < 1, opacity });
-  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 32, radius, 8, false), m));
-  const tip = curve.getPoint(1), before = curve.getPoint(0.95);
-  const cone = new THREE.Mesh(new THREE.ConeGeometry(radius * 3.2, radius * 8, 14), m);
-  cone.position.copy(tip);
-  cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tip.clone().sub(before).normalize());
-  g.add(cone);
+  const y = 0.36;
+  const A = new THREE.Vector3(a.x, y, a.z), B0 = new THREE.Vector3(b.x, y, b.z);
+  const dir = B0.clone().sub(A);
+  const len = dir.length();
+  if (len < 0.5) return g;
+  dir.normalize();
+  const B = B0.clone().addScaledVector(dir, -Math.min(endGap, len * 0.45));
+  const side = new THREE.Vector3(-dir.z, 0, dir.x);
+  const mid = A.clone().add(B).multiplyScalar(0.5).addScaledVector(side, Math.sign(bend) * Math.min(Math.abs(len * bend), 3));
+  const curve = new THREE.QuadraticBezierCurve3(A, mid, B);
+
+  // a ribbon (flat strip) along the curve
+  const n = 40, pts = curve.getPoints(n);
+  const pos = [], idx = [];
+  for (let i = 0; i <= n; i++) {
+    const t = curve.getTangent(i / n);
+    const nrm = new THREE.Vector3(-t.z, 0, t.x).normalize().multiplyScalar(width / 2);
+    const p = pts[i];
+    pos.push(p.x + nrm.x, y, p.z + nrm.z, p.x - nrm.x, y, p.z - nrm.z);
+    if (i < n) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+  const ribbon = new THREE.Mesh(geo, m);
+  ribbon.renderOrder = 1;
+  g.add(ribbon);
+
+  // flat triangle head
+  const t = curve.getTangent(1).normalize();
+  const nrm = new THREE.Vector3(-t.z, 0, t.x);
+  const hl = width * 4.2, hw = width * 2.6;
+  const tip = B.clone().addScaledVector(t, hl * 0.4);
+  const base = tip.clone().addScaledVector(t, -hl);
+  const hg = new THREE.BufferGeometry();
+  hg.setAttribute('position', new THREE.Float32BufferAttribute([
+    tip.x, y + 0.005, tip.z,
+    base.x + nrm.x * hw, y + 0.005, base.z + nrm.z * hw,
+    base.x - nrm.x * hw, y + 0.005, base.z - nrm.z * hw,
+  ], 3));
+  const head = new THREE.Mesh(hg, m);
+  head.renderOrder = 1;
+  g.add(head);
+
+  // a small dot where the arrow starts
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(width * 1.6, 20), m);
+  dot.rotation.x = -Math.PI / 2;
+  dot.position.set(A.x, y + 0.004, A.z);
+  dot.renderOrder = 1;
+  g.add(dot);
   return g;
 }

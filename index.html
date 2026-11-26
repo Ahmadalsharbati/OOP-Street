@@ -57,6 +57,8 @@
       </div>
     </section>
 
+    <div class="splitter" id="split-left" title="Drag to resize · Double-click to hide/show the code"><span></span></div>
+
     <section class="stage">
       <div id="scene" class="scene"></div>
       <div id="labels" class="labels"></div>
@@ -72,6 +74,9 @@
           <button id="btn-zoom-in" class="btn icon" title="Zoom in">+</button>
         </div>
         <button id="btn-fit" class="btn" title="See the whole street">Fit all</button>
+        <button id="btn-big" class="btn icon" title="Big street: hide code and panel (again to bring them back)">
+          <svg viewBox="0 0 16 16"><path d="M2 2h5v1.6H3.6V7H2zM14 2v5h-1.6V3.6H9V2zM2 14V9h1.6v3.4H7V14zM14 14H9v-1.6h3.4V9H14z"/></svg>
+        </button>
         <button id="btn-legend" class="btn icon" title="What do the colors mean?">?</button>
       </div>
 
@@ -91,6 +96,8 @@
       <div class="caption" id="explain"></div>
       <div class="stage-help">Drag to move · Scroll to zoom</div>
     </section>
+
+    <div class="splitter" id="split-right" title="Drag to resize · Double-click to hide/show the panel"><span></span></div>
 
     <aside class="side">
       <nav class="tabs">

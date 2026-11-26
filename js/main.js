@@ -207,6 +207,60 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }
 });
 
+// ---------- resizable panels (drag the handles, double-click to hide) ----------
+const app = document.querySelector('.app');
+const sizes = { left: 440, right: 300 };
+const saved = { left: 440, right: 300 };
+try { Object.assign(sizes, JSON.parse(localStorage.getItem('oopstreet.sizes') || '{}')); } catch { /* storage not available */ }
+function applySizes() {
+  app.style.setProperty('--left', sizes.left + 'px');
+  app.style.setProperty('--right', sizes.right + 'px');
+  app.classList.toggle('no-left', sizes.left === 0);
+  app.classList.toggle('no-right', sizes.right === 0);
+  $('btn-big').classList.toggle('on', sizes.left === 0 && sizes.right === 0);
+  try { localStorage.setItem('oopstreet.sizes', JSON.stringify(sizes)); } catch { /* ignore */ }
+}
+function makeSplitter(el, side) {
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('dragging');
+    document.body.classList.add('resizing');
+    const startX = e.clientX, start = sizes[side];
+    const max = app.clientWidth - 420 - (side === 'left' ? sizes.right : sizes.left);
+    const move = (ev) => {
+      const dx = ev.clientX - startX;
+      let w = side === 'left' ? start + dx : start - dx;
+      w = Math.max(0, Math.min(max, w));
+      if (w < 140) w = 0; // small enough: hide it
+      sizes[side] = Math.round(w);
+      applySizes();
+    };
+    const up = () => {
+      el.classList.remove('dragging');
+      document.body.classList.remove('resizing');
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      if (sizes[side] > 0) saved[side] = sizes[side];
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  });
+  el.addEventListener('dblclick', () => {
+    sizes[side] = sizes[side] === 0 ? (saved[side] || (side === 'left' ? 440 : 300)) : 0;
+    applySizes();
+  });
+}
+makeSplitter($('split-left'), 'left');
+makeSplitter($('split-right'), 'right');
+$('btn-big').addEventListener('click', () => {
+  const big = sizes.left === 0 && sizes.right === 0;
+  if (big) { sizes.left = saved.left || 440; sizes.right = saved.right || 300; }
+  else { if (sizes.left) saved.left = sizes.left; if (sizes.right) saved.right = sizes.right; sizes.left = 0; sizes.right = 0; }
+  applySizes();
+});
+applySizes();
+
 // ---------- tabs ----------
 let currentTab = 'vars';
 function openTab(name) {
