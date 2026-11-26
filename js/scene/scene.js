@@ -517,6 +517,7 @@ export class StreetScene {
 
   // ---------- the code of the method we are inside (next to its house) ----------
   addCodeCard(L, state, top) {
+    this.codeCardHTML = '';
     if (!top || state.frames.length < 2 || !top.startLine || !this.sourceLines) return;
     const first = top.startLine, last = Math.min(top.endLine, this.sourceLines.length);
     // long methods: show a window of 14 lines around the current line
@@ -531,18 +532,9 @@ export class StreetScene {
       const text = (this.sourceLines[n - 1] || '').slice(minIndent) || ' ';
       rows.push(`<div class="cl${n === top.line ? ' now' : ''}"><i>${n}</i><span>${highlightJava(text)}</span></div>`);
     }
-    let pos;
-    const h = top.thisId !== null ? L.houses.get(top.thisId) : null;
-    let alt;
-    if (h) { pos = new THREE.Vector3(h.x + 2.8 * S, 2.6 * S, h.z); alt = new THREE.Vector3(h.x - 2.8 * S, 2.6 * S, h.z); }
-    else {
-      const d = L.districts.find(x => x.kind === 'class' && x.name === top.cls);
-      pos = d ? new THREE.Vector3(d.board.x + 3.5 * S, 2.6 * S, d.board.z + 2) : this.person.position.clone();
-    }
-    const title = top.isCtor ? 'constructor' : shortLabel(top.label);
-    this.addLabel(pos, `<div class="codecard"><div class="ct">${esc(title)}<span>inside</span></div>${a > first ? '<div class="cl more">…</div>' : ''}${rows.join('')}${b < last ? '<div class="cl more">…</div>' : ''}</div>`, 'code', null, 4, 'left');
-    // not enough room on the right of the house: show it on the left
-    if (alt) this.labels[this.labels.length - 1].alt = alt;
+    const title = top.isCtor ? `${top.cls} constructor` : shortLabel(top.label);
+    const where = top.thisId !== null ? `house #${top.thisId}` : `class ${top.cls}`;
+    this.codeCardHTML = `<div class="codecard"><div class="ct">${esc(title)}<span>inside · ${esc(where)}</span></div>${a > first ? '<div class="cl more">…</div>' : ''}${rows.join('')}${b < last ? '<div class="cl more">…</div>' : ''}</div>`;
   }
 
   // ===================== camera =====================

@@ -287,6 +287,7 @@ function show() {
 
   renderVariables(state, prev?.state);
   scene.update(step);
+  $('codecard').innerHTML = scene.codeCardHTML || '';
   updateButtons();
   renderGutter();
   if (!playTimer && step.line !== replayLine) replayLine = step.final ? null : step.line;

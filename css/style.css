@@ -311,3 +311,6 @@ details[open] > summary.v-row::before { transform: rotate(90deg); }
 .codecard .cl.now { background: rgba(250, 204, 21, 0.18); box-shadow: inset 3px 0 0 #facc15; }
 .codecard .cl.now i { color: #facc15; }
 .codecard .cl.more { color: #4a5063; padding-left: 40px; }
+
+.codecard-slot { position: absolute; top: 40px; left: 12px; z-index: 19000; pointer-events: none; max-width: 46%; }
+.codecard-slot .codecard { overflow: hidden; }
