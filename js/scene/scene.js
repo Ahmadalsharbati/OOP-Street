@@ -500,6 +500,15 @@ export class StreetScene {
         this.addLabel(p || near(), `<div class="bubble ret">↩ ${esc(e.method)}() → ${esc(valText(e.value))}</div>`, 'bubble'); n++;
       }
       if (e.type === 'print') { this.addLabel(new THREE.Vector3(), `<div class="bubble print">${esc(e.text.replace(/\n$/, ''))}</div>`, 'bubble', near, -1); n++; }
+      if (e.type === 'superCall' && at(e.thisId)) {
+        this.addLabel(at(e.thisId).add(new THREE.Vector3(0, 0, -0.8)), `<div class="bubble inherit">⬆ super: build the ${esc(e.parent)} part first</div>`, 'bubble'); n++;
+      }
+      if (e.type === 'dispatch' && at(e.id)) {
+        const txt = e.kind === 'inherited' ? `⬆ ${e.method}() inherited from ${e.cls}`
+          : e.kind === 'override' ? `★ ${e.objCls}'s own ${e.method}() (@Override)`
+            : `⬆ super.${e.method}() of ${e.cls}`;
+        this.addLabel(at(e.id).add(new THREE.Vector3(0, 0, -0.8)), `<div class="bubble inherit">${esc(txt)}</div>`, 'bubble'); n++;
+      }
       if (e.type === 'autoToString' && at(e.id)) { this.addLabel(at(e.id), `<div class="bubble info">println calls toString()</div>`, 'bubble'); n++; }
       if (e.type === 'blocked') {
         const p = e.id !== null ? at(e.id) : null;
@@ -726,7 +735,8 @@ function shortLabel(label) { return label.replace(/\(.*\)$/, '()'); }
 function badges(m) {
   let b = m.visibility === 'private' ? '<b class="bd lock" title="private: locked">🔒</b>'
     : m.visibility === 'public' ? '<b class="bd pub" title="public: open">+</b>'
-      : '<b class="bd pkg" title="package only">~</b>';
+      : m.visibility === 'protected' ? '<b class="bd prot" title="protected: the family (children) and the package">#</b>'
+        : '<b class="bd pkg" title="package only">~</b>';
   if (m.static) b += '<b class="bd st" title="static: shared">S</b>';
   if (m.final) b += '<b class="bd fin" title="final: cannot change">F</b>';
   return b;
@@ -740,9 +750,11 @@ function blueprintCard(c, hasObjects, events, color, open) {
   const rowField = (f) => `<div class="row${blocked.has(f.name) ? ' blocked' : ''}">${badges(f)}<span class="n">${esc(f.name)}</span><span class="t">${esc(f.type)}</span></div>`;
   const rowCtor = (k) => `<div class="row${called.has('<init>') ? ' set' : ''}">${badges(k)}<span class="code">new ${esc(c.name)}(${esc(paramTypes(k.params))})</span></div>`;
   const autoCtor = `<div class="row${called.has('<init>') ? ' set' : ''}">${badges({ visibility: 'public' })}<span class="code">new ${esc(c.name)}()</span><span class="note">auto</span></div>`;
-  const rowMethod = (m) => `<div class="row${called.has(m.name) ? ' set' : blocked.has(m.name) ? ' blocked' : ''}">${badges(m)}<span class="code">${esc((m.static ? c.name + '.' : '.') + m.name + '(' + paramTypes(m.params) + ')')}</span><span class="t">${m.returnType === 'void' ? '' : esc(m.returnType)}</span></div>`;
-  const onlyStatic = c.methods.every(m => m.static) && !inst.length && !c.ctors.length;
-  const title = `<div class="title"><span class="dot"></span>class ${esc(c.name)}${c.pkg ? `<span class="pkg">${esc(c.pkg)}</span>` : ''}<span class="toggle">${open ? '−' : '+'}</span></div>`;
+  const rowMethod = (m) => `<div class="row${called.has(m.name) ? ' set' : blocked.has(m.name) ? ' blocked' : ''}">${badges(m)}<span class="code${m.abstract ? ' abstract' : ''}">${esc((m.static ? c.name + '.' : '.') + m.name + '(' + paramTypes(m.params) + ')')}</span><span class="t">${m.abstract ? 'abstract' : m.returnType === 'void' ? '' : esc(m.returnType)}</span></div>`;
+  const onlyStatic = c.methods.every(m => m.static) && !inst.length && !c.ctors.length && !c.superName;
+  const ext = c.superName ? `<div class="ext">extends ${esc(c.superName)}</div>` : '';
+  const abs = c.isAbstract ? `<div class="abs">abstract · no house can be built from it</div>` : '';
+  const title = `<div class="title"><span class="dot"></span>${c.isAbstract ? '<i>abstract</i> ' : ''}class ${esc(c.name)}${c.pkg ? `<span class="pkg">${esc(c.pkg)}</span>` : ''}<span class="toggle">${open ? '−' : '+'}</span></div>${ext}${abs}`;
 
   if (!open) {
     // small: a summary + only the members used in this step
@@ -752,7 +764,7 @@ function blueprintCard(c, hasObjects, events, color, open) {
       ...c.methods.filter(m => called.has(m.name) || blocked.has(m.name)).map(rowMethod),
     ].join('');
     const summary = `${inst.length} field${inst.length === 1 ? '' : 's'} · ${c.methods.length} method${c.methods.length === 1 ? '' : 's'}`;
-    return `<div class="card blueprint small" data-board="${esc(c.name)}" style="--c:${hex(color)}">${title}<div class="summary">${summary}${hasObjects || onlyStatic ? '' : ' · no object yet'}</div>${used}</div>`;
+    return `<div class="card blueprint small" data-board="${esc(c.name)}" style="--c:${hex(color)}">${title}<div class="summary">${summary}${hasObjects || onlyStatic || c.isAbstract ? '' : ' · no object yet'}</div>${used}</div>`;
   }
   return `<div class="card blueprint" data-board="${esc(c.name)}" style="--c:${hex(color)}">${title}
     ${inst.length ? `<div class="sec">Fields</div>${inst.map(rowField).join('')}` : ''}
@@ -764,10 +776,11 @@ function blueprintCard(c, hasObjects, events, color, open) {
 
 function houseCard(o, cls, { active, touched, color }) {
   const rows = o.fields.map(f => {
-    const meta = cls.fields.find(x => x.name === f.name) || f;
+    const meta = cls.fields.find(x => x.name === f.name) || { visibility: f.visibility, final: f.final };
     const key = o.id + '.' + f.name;
     const st = touched.blocked.has(key) ? ' blocked' : touched.rejected.has(key) ? ' rejected' : touched.set.has(key) ? ' set' : touched.get.has(key) ? ' get' : '';
-    return `<div class="row${st}">${badges(meta)}<span class="n">${esc(f.name)}</span><span class="v">${esc(valText(f.value))}</span></div>`;
+    const from = f.from && f.from !== o.cls ? `<span class="from" title="inherited from ${esc(f.from)}">${esc(f.from)}</span>` : '';
+    return `<div class="row${st}">${badges(meta)}<span class="n">${esc(f.name)}</span>${from}<span class="v">${esc(valText(f.value))}</span></div>`;
   }).join('');
   const gc = o.reachable ? '' : '<div class="hint">Nobody points here → Garbage Collector</div>';
   return `<div class="card house${active ? ' active' : ''}${o.reachable ? '' : ' ghost'}" data-house="${o.id}" style="--c:${hex(color)}">

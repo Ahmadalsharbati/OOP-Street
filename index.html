@@ -88,6 +88,7 @@
         <span><b class="bd lock">🔒</b>private · locked</span>
         <span><b class="bd pub">+</b>public · open to all</span>
         <span><b class="bd pkg">~</b>no word · same package</span>
+        <span><b class="bd prot">#</b>protected · children + package</span>
         <span><b class="bd st">S</b>static · shared by all</span>
         <span><b class="bd fin">F</b>final · cannot change</span>
         <span class="muted">Yellow ring = the object <code>this</code></span>
@@ -113,7 +114,8 @@
           <div class="uml-side">
             <div class="uml-legend">
               <div class="sec">How to read it</div>
-              <div class="txt"><b>+</b> public · <b>−</b> private · <b>~</b> package · <u>underlined</u> = static</div>
+              <div class="txt"><b>+</b> public · <b>−</b> private · <b>#</b> protected · <b>~</b> package · <u>underlined</u> = static · <i>italic</i> = abstract</div>
+              <div><svg width="56" height="14"><line x1="2" y1="7" x2="42" y2="7" stroke="#6d28d9" stroke-width="1.5"/><path d="M42 1 L54 7 L42 13 Z" fill="#fff" stroke="#6d28d9" stroke-width="1.5"/></svg> héritage: extends (child → parent)</div>
               <div><svg width="56" height="12"><line x1="2" y1="6" x2="50" y2="6" stroke="#475069" stroke-width="1.5"/><path d="M44 1 L52 6 L44 11" fill="none" stroke="#475069" stroke-width="1.5"/></svg> knows the other (one way)</div>
               <div><svg width="56" height="12"><line x1="2" y1="6" x2="52" y2="6" stroke="#475069" stroke-width="1.5"/></svg> both know each other</div>
               <div><svg width="56" height="12"><path d="M2 6 L10 2 L18 6 L10 10 Z" fill="#fff" stroke="#475069" stroke-width="1.5"/><line x1="18" y1="6" x2="52" y2="6" stroke="#475069" stroke-width="1.5"/></svg> agrégation: comes from outside</div>

@@ -424,11 +424,20 @@ function renderUmlPanel() {
     colorOf: (n) => '#' + scene.colorOf(n).toString(16).padStart(6, '0'),
     active: top ? top.cls : null, counts, hotFields: hot,
   });
-  if (!umlModel.relations.length) {
-    list.innerHTML = '<p class="none">No relations: no field has another class as its type.</p>';
+  const heritage = (umlModel.inherits || []).map(h => {
+    const d = document.createElement('div');
+    d.className = 'rel';
+    d.innerHTML = `<div class="top"></div><div><span class="kind heritage">héritage</span></div><div class="why"></div><span class="go">Show class in code →</span>`;
+    d.querySelector('.top').textContent = `${h.child} ——▷ ${h.parent}`;
+    d.querySelector('.why').textContent = `${h.child} extends ${h.parent}: a ${h.child} IS a ${h.parent}. It gets the fields and methods of ${h.parent}, and can override them.`;
+    d.querySelector('.go').addEventListener('click', () => { showUml(false); scrollToLine(h.line); markFlash(h.line); });
+    return d;
+  });
+  if (!umlModel.relations.length && !heritage.length) {
+    list.innerHTML = '<p class="none">No relations: no field has another class as its type, and no extends.</p>';
     return;
   }
-  list.replaceChildren(...umlModel.relations.map(r => {
+  list.replaceChildren(...heritage, ...umlModel.relations.map(r => {
     const d = document.createElement('div');
     const isHot = hot.has(r.from + '.' + r.field) || (r.backField && hot.has(r.to + '.' + r.backField));
     d.className = 'rel' + (isHot ? ' hot' : '');
@@ -500,7 +509,8 @@ function renderVariables(state, prevState) {
   root.appendChild(title);
 
   const rows = [];
-  if (top.thisId !== null) rows.push({ name: 'this', value: { kind: 'object', id: top.thisId, cls: top.cls } });
+  // "this" is the real object (a Chien), even inside a method written in the parent (Animal)
+  if (top.thisId !== null) rows.push({ name: 'this', value: { kind: 'object', id: top.thisId, cls: heap.get(top.thisId)?.cls || top.cls } });
   for (const v of top.vars) rows.push(v);
   if (!rows.length) root.appendChild(para('No variables yet.', 'empty-note'));
   for (const r of rows) {

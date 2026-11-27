@@ -352,3 +352,13 @@ details[open] > summary.v-row::before { transform: rotate(90deg); }
 .uml-relations .rel .why { color: var(--ink-2); line-height: 1.45; }
 .uml-relations .rel .go { color: var(--accent); cursor: pointer; font-size: 11.5px; margin-top: 3px; display: inline-block; }
 .uml-relations .none { color: var(--muted); }
+
+/* inheritance */
+.bubble.inherit { background: #ede9fe; color: #5b21b6; border: 1px solid #c4b5fd; }
+.card .row .from { font-family: var(--sans); font-size: 9.5px; color: #6d28d9; background: #ede9fe; border-radius: 4px; padding: 0 4px; }
+.card .ext { font-family: var(--mono); font-size: 11px; color: #6d28d9; padding: 0 11px 2px; }
+.card .abs { font-size: 10.5px; color: var(--muted); padding: 0 11px 2px; font-style: italic; }
+.card .code.abstract { font-style: italic; color: var(--muted); }
+.bd.prot { background: #ede9fe; color: #6d28d9; }
+.uml-svg .uml-title.abstract, .uml-svg .uml-line.abstract { font-style: italic; }
+.uml-relations .rel .kind.heritage { background: #ede9fe; color: #6d28d9; }

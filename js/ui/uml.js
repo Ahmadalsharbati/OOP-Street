@@ -59,18 +59,23 @@ export function analyzeUml(program) {
     used.add(i);
   });
 
+  // héritage: child extends parent
+  const inherits = decls
+    .filter(c => c.superName && names.has(c.superName.slice(c.superName.lastIndexOf('.') + 1)))
+    .map(c => ({ child: c.name, parent: c.superName.slice(c.superName.lastIndexOf('.') + 1), line: c.line }));
+
   const classes = decls.map(c => ({
-    name: c.name, pkg: c.pkg, line: c.line,
+    name: c.name, pkg: c.pkg, line: c.line, abstract: !!c.modifiers.abstract, superName: c.superName,
     fields: c.fields
       .filter(f => !(names.has(f.type.name) && !f.modifiers.static)) // relations are drawn as lines, not as fields
       .map(f => ({ name: f.name, type: typeText(f.type), vis: f.modifiers.visibility, static: f.modifiers.static, final: f.modifiers.final })),
     ctors: c.ctors.map(m => ({ name: c.name, params: m.params.map(p => p.name + ': ' + typeText(p.type)), vis: m.modifiers.visibility })),
     methods: c.methods.map(m => ({
       name: m.name, params: m.params.map(p => p.name + ': ' + typeText(p.type)), ret: typeText(m.returnType),
-      vis: m.modifiers.visibility, static: m.modifiers.static,
+      vis: m.modifiers.visibility, static: m.modifiers.static, abstract: !!m.abstract,
     })),
   }));
-  return { classes, relations: merged };
+  return { classes, relations: merged, inherits };
 }
 
 function typeText(t) { return t.name + '[]'.repeat(t.dims || 0); }
@@ -130,7 +135,7 @@ export function renderUml(model, options = {}) {
   // 0. order: start from the class with most relations, then its neighbours (they end up next to each other)
   const deg = new Map(model.classes.map(c => [c.name, 0]));
   const adj = new Map(model.classes.map(c => [c.name, []]));
-  for (const r of model.relations) {
+  for (const r of [...model.relations, ...(model.inherits || []).map(i => ({ from: i.child, to: i.parent }))]) {
     if (r.from === r.to) continue;
     deg.set(r.from, deg.get(r.from) + 1); deg.set(r.to, deg.get(r.to) + 1);
     adj.get(r.from).push(r.to); adj.get(r.to).push(r.from);
@@ -156,9 +161,9 @@ export function renderUml(model, options = {}) {
     ];
     const ops = [
       ...c.ctors.map(k => ({ text: `${VIS[k.vis]} ${k.name}(${k.params.join(', ')})` })),
-      ...c.methods.map(m => ({ text: `${VIS[m.vis]} ${m.name}(${m.params.join(', ')})${m.ret === 'void' ? '' : ': ' + m.ret}`, static: m.static })),
+      ...c.methods.map(m => ({ text: `${VIS[m.vis]} ${m.name}(${m.params.join(', ')})${m.ret === 'void' ? '' : ': ' + m.ret}`, static: m.static, abstract: m.abstract })),
     ];
-    const title = c.name;
+    const title = (c.abstract ? '«abstract» ' : '') + c.name;
     const w = Math.max(150, Math.min(340, PAD * 2 + CH * Math.max(title.length + 4, ...lines.map(l => l.text.length), ...ops.map(l => l.text.length))));
     const h = 34 + Math.max(1, lines.length) * LH + 10 + Math.max(1, ops.length) * LH + 8;
     return { c, lines, ops, w, h };
@@ -170,7 +175,8 @@ export function renderUml(model, options = {}) {
   // as many columns as fit in the space we have (never smaller than real size)
   const fit = Math.max(1, Math.floor((availableWidth - 40) / (maxW + 200)));
   // with relations: at least 2 columns, so lines go between neighbours and not through other boxes
-  const cols = Math.max(model.relations.length && n > 1 ? 2 : 1, Math.min(fit, Math.ceil(Math.sqrt(n * 1.6))));
+  const linked = model.relations.length + (model.inherits || []).length;
+  const cols = Math.max(linked && n > 1 ? 2 : 1, Math.min(fit, Math.ceil(Math.sqrt(n * 1.6))));
   const colW = maxW + 200;
   const rowsH = [];
   boxes.forEach((b, i) => { const r = Math.floor(i / cols); rowsH[r] = Math.max(rowsH[r] || 0, b.h); });
@@ -188,6 +194,7 @@ export function renderUml(model, options = {}) {
   const parts = [];
   parts.push(`<defs>
     <marker id="uml-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M1 1 L11 6 L1 11" fill="none" stroke="#475069" stroke-width="1.6"/></marker>
+    <marker id="uml-inherit" viewBox="0 0 16 16" refX="15" refY="8" markerWidth="16" markerHeight="16" orient="auto"><path d="M1 1 L15 8 L1 15 Z" fill="#fff" stroke="#6d28d9" stroke-width="1.6"/></marker>
     <marker id="uml-arrow-hot" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse"><path d="M1 1 L11 6 L1 11" fill="none" stroke="#d97706" stroke-width="1.8"/></marker>
   </defs>`);
 
@@ -228,6 +235,15 @@ export function renderUml(model, options = {}) {
     }
   });
 
+  // héritage: child → parent with an empty triangle
+  for (const h of model.inherits || []) {
+    const A = byName.get(h.child), B = byName.get(h.parent);
+    if (!A || !B) continue;
+    const [p1, p2] = connect(A, B);
+    const hot = active === h.child || active === h.parent;
+    parts.push(`<line x1="${p1.x}" y1="${p1.y}" x2="${p2.x}" y2="${p2.y}" stroke="#6d28d9" stroke-width="${hot ? 2.2 : 1.6}" marker-end="url(#uml-inherit)"/>`);
+  }
+
   // boxes
   for (const b of boxes) {
     const color = colorOf(b.c.name);
@@ -236,7 +252,7 @@ export function renderUml(model, options = {}) {
     parts.push(`<g class="uml-box${isActive ? ' active' : ''}" data-class="${esc(b.c.name)}">`);
     parts.push(`<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10" fill="#fff" stroke="${isActive ? '#facc15' : '#d5d9e2'}" stroke-width="${isActive ? 3 : 1.2}"/>`);
     parts.push(`<path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v20 h-${b.w} z" fill="${color}"/>`);
-    parts.push(`<text x="${b.x + b.w / 2}" y="${b.y + 20}" text-anchor="middle" class="uml-title">${esc(b.c.name)}</text>`);
+    parts.push(`<text x="${b.x + b.w / 2}" y="${b.y + 20}" text-anchor="middle" class="uml-title${b.c.abstract ? ' abstract' : ''}">${b.c.abstract ? '«abstract» ' : ''}${esc(b.c.name)}</text>`);
     if (cnt) parts.push(`<text x="${b.x + b.w - 8}" y="${b.y + 20}" text-anchor="end" class="uml-count">${cnt} obj</text>`);
     let yy = b.y + 30 + LH - 3;
     if (!b.lines.length) yy += LH;
@@ -244,7 +260,7 @@ export function renderUml(model, options = {}) {
     const sepY = b.y + 34 + Math.max(1, b.lines.length) * LH + 2;
     parts.push(`<line x1="${b.x}" y1="${sepY}" x2="${b.x + b.w}" y2="${sepY}" stroke="#e6e8ee"/>`);
     yy = sepY + LH - 2;
-    for (const l of b.ops) { parts.push(`<text x="${b.x + PAD}" y="${yy}" class="uml-line${l.static ? ' st' : ''}">${esc(l.text)}</text>`); yy += LH; }
+    for (const l of b.ops) { parts.push(`<text x="${b.x + PAD}" y="${yy}" class="uml-line${l.static ? ' st' : ''}${l.abstract ? ' abstract' : ''}">${esc(l.text)}</text>`); yy += LH; }
     parts.push('</g>');
   }
 

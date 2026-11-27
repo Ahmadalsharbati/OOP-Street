@@ -69,8 +69,14 @@ Every class becomes a district with its blueprint board, and every `new` builds 
   click again for the next time. Click a class or field line to fly to its district. **Replay** plays the line again slowly,
   **Play** (or Space) runs the program by itself.
 
+- **Inheritance (héritage):** `extends`, `super(...)`, `super.method()`, `protected`, `@Override` with late binding,
+  `abstract` classes and methods, polymorphism (`Animal a = new Chien()`), `instanceof`, casts and `ClassCastException`.
+  In the street: inherited baskets are tagged with the parent class, a bubble shows when the parent part is built
+  (super) and which version of a method runs (inherited / @Override / super). In the UML: empty-triangle arrows,
+  `«abstract»` and italic abstract methods, `#` for protected.
+
 Not supported yet (you get a clear message, never a silent failure):
-inheritance (`extends`), interfaces, `ArrayList`, `Scanner`, lambdas.
+interfaces, `ArrayList`, `Scanner`, lambdas.
 
 ## Run it on your computer
 

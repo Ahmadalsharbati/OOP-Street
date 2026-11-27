@@ -19,7 +19,8 @@ import {
 } from './values.js';
 import { BuiltinClasses, BUILTIN_TYPES, needsImport } from './builtins.js';
 
-const MAX_DEPTH = 400;   // frames before StackOverflowError
+const MAX_DEPTH = 400;
+const RANK = { private: 0, package: 1, protected: 2, public: 3 };   // frames before StackOverflowError
 
 class Completion {
   constructor(type, value = null) { this.type = type; this.value = value; }
@@ -52,9 +53,6 @@ export class Interpreter {
         this.problem(`The type ${decl.name} is already defined`, decl.line);
         continue;
       }
-      if (decl.superName && decl.superName !== 'Object') {
-        throw new UnsupportedFeature(`"extends" (inheritance) is not supported yet: class ${decl.name} extends ${decl.superName}.`, decl.line);
-      }
       const info = {
         decl, name: decl.name, pkg: decl.pkg,
         fullName: decl.pkg ? decl.pkg + '.' + decl.name : decl.name,
@@ -63,7 +61,10 @@ export class Interpreter {
         methods: decl.methods,
         ctors: decl.ctors,
         isPublic: decl.modifiers.visibility === 'public',
+        isAbstract: !!decl.modifiers.abstract,
+        superCls: null,             // the parent class (extends), or null
       };
+      for (const m of [...decl.methods, ...decl.ctors]) m.owner = info;
       for (const f of decl.fields) {
         if (info.fields.has(f.name)) { f.problem = `Duplicate field ${decl.name}.${f.name}`; this.problem(f.problem, f.line); }
         else info.fields.set(f.name, f);
@@ -71,8 +72,69 @@ export class Interpreter {
       this.classes.set(decl.name, info);
     }
 
+    // extends: link every class to its parent
+    for (const info of this.classes.values()) {
+      const sup = info.decl.superName;
+      if (!sup || sup === 'Object' || sup === 'java.lang.Object') continue;
+      const simple = sup.slice(sup.lastIndexOf('.') + 1);
+      const parent = this.classes.get(simple);
+      if (!parent) {
+        if (BUILTIN_TYPES.has(simple)) {
+          info.problem = simple === 'String' || simple === 'Integer' || simple === 'Double' || simple === 'Math'
+            ? `The type ${info.name} cannot subclass the final class ${simple}`
+            : `OOP Street cannot extend the library class ${simple}`;
+        } else info.problem = `${sup} cannot be resolved to a type`;
+        this.problem(info.problem, info.decl.line);
+        continue;
+      }
+      try { this.resolveClassName(sup, info, info.decl.line); } catch (e) { info.problem = e.message; this.problem(e.message, info.decl.line); continue; }
+      info.superCls = parent;
+    }
+    // a class cannot extend itself (directly or not)
+    for (const info of this.classes.values()) {
+      const seen = new Set();
+      for (let c = info; c; c = c.superCls) {
+        if (seen.has(c)) {
+          info.problem = `The hierarchy of the type ${info.name} is inconsistent (it extends itself)`;
+          this.problem(info.problem, info.decl.line);
+          info.superCls = null;
+          break;
+        }
+        seen.add(c);
+      }
+    }
+
     // Checks that Eclipse would show as red marks before running.
     for (const info of this.classes.values()) {
+      // abstract methods: only in abstract classes, and concrete children must write them all
+      for (const m of info.methods) {
+        if (m.abstract && !info.isAbstract) {
+          m.problem = `The type ${info.name} must be an abstract class to define abstract methods`;
+          this.problem(m.problem, m.line);
+          info.problem = info.problem || m.problem;
+        }
+      }
+      if (!info.isAbstract) {
+        for (const m of this.allMethods(info)) {
+          if (m.abstract) {
+            info.problem = info.problem || `The type ${info.name} must implement the inherited abstract method ${m.owner.name}.${sigOf(m)}`;
+            this.problem(info.problem, info.decl.line);
+            break;
+          }
+        }
+      }
+      // @Override must not make a method less visible
+      for (const m of info.methods) {
+        const parentM = info.superCls ? this.allMethods(info.superCls).find(pm => sigOf(pm) === sigOf(m) && !pm.modifiers.static) : null;
+        if (parentM && RANK[m.modifiers.visibility] < RANK[parentM.modifiers.visibility]) {
+          m.problem = `Cannot reduce the visibility of the inherited method from ${parentM.owner.name}`;
+          this.problem(m.problem, m.line);
+        }
+        if (parentM && typeName(parentM.returnType) !== typeName(m.returnType)) {
+          m.problem = `The return type is incompatible with ${parentM.owner.name}.${sigOf(parentM)}`;
+          this.problem(m.problem, m.line);
+        }
+      }
       for (const f of info.decl.fields) this.checkTypeExists(f.type, info, f.line, f);
       const seen = new Map();
       for (const m of [...info.methods, ...info.ctors]) {
@@ -85,7 +147,7 @@ export class Interpreter {
         for (const p of m.params) this.checkTypeExists(p.type, info, m.line, m);
         if (!m.isCtor && m.returnType.name !== 'void') {
           this.checkTypeExists(m.returnType, info, m.line, m);
-          if (canCompleteNormally(m.body)) {
+          if (m.body && canCompleteNormally(m.body)) {
             m.problem = `This method must return a result of type ${typeName(m.returnType)}`;
             this.problem(m.problem, m.line);
           }
@@ -102,6 +164,58 @@ export class Interpreter {
   }
 
   problem(message, line) { this.problems.push({ message, line }); }
+
+  // ================= inheritance helpers =================
+  // is class a the same as b, or a child (grand-child...) of b?
+  isSubclass(a, b) {
+    for (let c = a; c; c = c.superCls) if (c === b) return true;
+    return false;
+  }
+
+  // find a field in the class or its parents: { f, owner }
+  findField(cls, name) {
+    for (let c = cls; c; c = c.superCls) {
+      const f = c.fields.get(name);
+      if (f) return { f, owner: c };
+    }
+    return null;
+  }
+
+  // every field of an object, parents first: [{ f, owner }]
+  allFields(cls) {
+    const chain = [];
+    for (let c = cls; c; c = c.superCls) chain.unshift(c);
+    const out = [];
+    for (const c of chain) for (const f of c.fields.values()) out.push({ f, owner: c });
+    return out;
+  }
+
+  // methods seen from a class: its own first, then inherited ones that are not overridden
+  allMethods(cls) {
+    const out = [], seen = new Set();
+    for (let c = cls; c; c = c.superCls) {
+      for (const m of c.methods) {
+        const sig = sigOf(m);
+        if (seen.has(sig)) continue;
+        seen.add(sig);
+        out.push(m);
+      }
+    }
+    return out;
+  }
+  methodsNamed(cls, name) { return this.allMethods(cls).filter(m => m.name === name); }
+
+  // dynamic dispatch (@Override): the version of m that the real object uses
+  dispatch(objCls, m) {
+    if (m.modifiers.static || m.modifiers.visibility === 'private') return m;
+    const sig = sigOf(m);
+    for (let c = objCls; c; c = c.superCls) {
+      const found = c.methods.find(x => sigOf(x) === sig && !x.modifiers.static);
+      if (found) return found;
+      if (c === m.owner) break;
+    }
+    return m;
+  }
 
   checkTypeExists(type, info, line, member) {
     if (isPrimitiveName(type.name) || type.name === 'void') return;
@@ -248,14 +362,21 @@ export class Interpreter {
       start = 1;
     } else {
       if (stmts[0] && stmts[0].kind === 'SuperCall') {
-        if (stmts[0].args.length) throw new UnsupportedFeature('super(...) with arguments needs inheritance, not supported yet.', stmts[0].line);
+        // super(...): the parent part of the object is built first
+        const call = stmts[0];
+        yield* this.stop(call.line);
+        const args = yield* this.evalArgs(call.args);
+        yield* this.superInit(cls, obj, args, call.line, true, false);
         start = 1;
+      } else {
+        // no super(...) written: Java calls super() by itself
+        yield* this.superInit(cls, obj, [], ctor.line, false, false);
       }
       yield* this.initInstanceFields(cls, obj);
     }
     for (let i = start; i < stmts.length; i++) {
       const s = stmts[i];
-      if (s.kind === 'ThisCall') throw new CompilationProblem('Constructor call must be the first statement in a constructor', s.line);
+      if (s.kind === 'ThisCall' || s.kind === 'SuperCall') throw new CompilationProblem('Constructor call must be the first statement in a constructor', s.line);
       const c = yield* this.exec(s);
       if (c.type === 'return') break;
     }
@@ -267,6 +388,47 @@ export class Interpreter {
       }
     }
     return null;
+  }
+
+  // Build the parent part of the object (explicit super(...) or the implicit super()).
+  *superInit(cls, obj, args, line, explicit, fromDefaultCtor) {
+    const parent = cls.superCls;
+    if (!parent) {
+      if (explicit && args.length) throw new CompilationProblem(`The constructor Object(${args.map(valueTypeName).join(', ')}) is undefined`, line);
+      return;
+    }
+    this.event({ type: 'superCall', parent: parent.name, child: cls.name, thisId: obj.id, explicit, line });
+    if (parent.ctors.length === 0) {
+      if (args.length) {
+        throw new CompilationProblem(`The constructor ${parent.name}(${args.map(valueTypeName).join(', ')}) is undefined`, line,
+          `${parent.name} has no constructor with parameters, only the automatic empty one.`);
+      }
+      // the parent's automatic (default) constructor
+      this.pushFrame({ cls: parent, method: null, label: parent.name + '.' + parent.name + '()', thisObj: obj, isStatic: false, line: parent.decl.line });
+      this.event({ type: 'call', cls: parent.name, method: '<init>', thisId: obj.id, static: false, line, args: [] });
+      yield* this.stop(parent.decl.line);
+      yield* this.superInit(parent, obj, [], parent.decl.line, false, true);
+      yield* this.initInstanceFields(parent, obj);
+      this.frames.pop();
+      this.event({ type: 'return', cls: parent.name, method: '<init>', thisId: obj.id, value: null });
+      return;
+    }
+    let ctor;
+    if (!explicit) {
+      ctor = parent.ctors.find(k => k.params.length === 0);
+      if (!ctor) {
+        throw new CompilationProblem(fromDefaultCtor
+          ? `Implicit super constructor ${parent.name}() is undefined for default constructor. Must define an explicit constructor`
+          : `Implicit super constructor ${parent.name}() is undefined. Must explicitly invoke another constructor`, line,
+        `${parent.name} has no empty constructor, so Java cannot build the ${parent.name} part alone. Write super(...) with the right values as the first line.`);
+      }
+    } else {
+      ctor = this.chooseMethod(parent, parent.ctors, args, line, true);
+    }
+    if (ctor.modifiers.visibility === 'private') {
+      throw new CompilationProblem(`The constructor ${parent.name}(${ctor.params.map(p => typeName(p.type)).join(', ')}) is not visible`, line);
+    }
+    yield* this.invoke(parent, ctor, obj, args, line);
   }
 
   *initInstanceFields(cls, obj) {
@@ -282,13 +444,22 @@ export class Interpreter {
   }
 
   *construct(cls, args, line) {
-    yield* this.ensureInit(cls);
-    if (cls.decl.modifiers.abstract) throw new CompilationProblem(`Cannot instantiate the type ${cls.name}`, line);
+    if (cls.problem) throw new CompilationProblem(cls.problem, line);
+    for (let c = cls; c; c = c.superCls) if (c.problem) throw new CompilationProblem(c.problem, line);
+    // parents are prepared first (their static fields)
+    const chain = [];
+    for (let c = cls; c; c = c.superCls) chain.unshift(c);
+    for (const c of chain) yield* this.ensureInit(c);
+    if (cls.isAbstract) {
+      throw new CompilationProblem(`Cannot instantiate the type ${cls.name}`, line,
+        `${cls.name} is abstract: it is only a general idea, you cannot build it. Build one of its children instead.`);
+    }
     const obj = {
       id: this.nextId++, cls, fields: new Map(), finalAssigned: new Set(), hash: null,
+      fieldOwner: new Map(), // field name -> class that declares it (for inherited baskets)
     };
-    for (const f of cls.fields.values()) {
-      if (!f.modifiers.static) obj.fields.set(f.name, defaultValue(f.type));
+    for (const { f, owner } of this.allFields(cls)) {
+      if (!f.modifiers.static) { obj.fields.set(f.name, defaultValue(f.type)); obj.fieldOwner.set(f.name, owner); }
     }
     if (cls.ctors.length === 0) {
       // default constructor: only exists when you wrote none
@@ -299,11 +470,12 @@ export class Interpreter {
       this.heap.push(obj);
       this.event({ type: 'new', id: obj.id, cls: cls.name, line });
       this.pushFrame({ cls, method: null, label: cls.name + '.' + cls.name + '()', thisObj: obj, isStatic: false, line: cls.decl.line });
-      this.event({ type: 'call', cls: cls.name, method: '<init>', thisId: obj.id, static: false, line });
+      this.event({ type: 'call', cls: cls.name, method: '<init>', thisId: obj.id, static: false, line, args: [] });
       yield* this.stop(cls.decl.line);
+      yield* this.superInit(cls, obj, [], cls.decl.line, false, true);
       yield* this.initInstanceFields(cls, obj);
       this.frames.pop();
-      this.event({ type: 'return', cls: cls.name, method: '<init>', value: null });
+      this.event({ type: 'return', cls: cls.name, method: '<init>', thisId: obj.id, value: null });
       return obj;
     }
     const ctor = this.chooseMethod(cls, cls.ctors, args, line, true);
@@ -368,7 +540,11 @@ export class Interpreter {
     if (tn === 'Integer') return v.t === 'int' ? 1 : v.t === 'null' ? 1 : -1;
     if (tn === 'Double') return v.t === 'double' ? 1 : v.t === 'null' ? 1 : -1;
     if (v.t === 'null') return 1;
-    if (v.t === 'ref' && !v.obj.isArray && v.obj.cls.name === tn) return 0;
+    if (v.t === 'ref' && !v.obj.isArray) {
+      // a Chien can go where an Animal is expected (the farther the parent, the higher the cost)
+      let d = 0;
+      for (let c = v.obj.cls; c; c = c.superCls, d++) if (c.name === tn) return d;
+    }
     return -1;
   }
 
@@ -396,6 +572,15 @@ export class Interpreter {
         }
       }
       throw new CompilationProblem(`Type mismatch: cannot convert from ${valueTypeName(v)} to ${tn}`, line);
+    }
+    // static type check: Animal a = ...; Chien c = a;  -> error even if a is really a Chien
+    if (expr && v.t === 'ref' && !v.obj.isArray && type.dims === 0) {
+      const target = this.classes.get(tn);
+      const st = this.classes.get(this.guessStaticType(expr));
+      if (target && st && !this.isSubclass(st, target)) {
+        throw new CompilationProblem(`Type mismatch: cannot convert from ${st.name} to ${tn}`, line,
+          this.isSubclass(target, st) ? `A ${st.name} is not always a ${tn}. If you are sure, cast it: (${tn}) ...` : undefined);
+      }
     }
     if (this.conversionCost(v, type) >= 0) {
       if ((tn === 'Integer' || tn === 'Double' || tn === 'Object') && type.dims === 0) return v;
@@ -654,7 +839,8 @@ export class Interpreter {
     switch (modifiers.visibility) {
       case 'public': return true;
       case 'private': return from === ownerCls;
-      default: return from && from.pkg === ownerCls.pkg; // package and protected (no inheritance yet)
+      case 'protected': return !!from && (from.pkg === ownerCls.pkg || this.isSubclass(from, ownerCls)); // same package or the family
+      default: return !!from && from.pkg === ownerCls.pkg;
     }
   }
 
@@ -712,6 +898,11 @@ export class Interpreter {
       case 'Paren': return yield* this.eval(e.expr);
 
       case 'Name': return this.evalName(e);
+
+      case 'Super':
+        if (this.frame.isStatic || !this.frame.thisObj) throw new CompilationProblem('Cannot use super in a static context', e.line);
+        if (!this.currentClass.superCls) return mkRef(this.frame.thisObj); // super of a class without extends = Object
+        return mkRef(this.frame.thisObj);
 
       case 'This':
         if (this.frame.isStatic || !this.frame.thisObj) throw new CompilationProblem('Cannot use this in a static context', e.line,
@@ -807,7 +998,10 @@ export class Interpreter {
         const tn = e.type.name;
         if (tn === 'Object') return mkBool(true);
         if (v.t === 'String') return mkBool(tn === 'String');
-        if (v.t === 'ref' && !v.obj.isArray) return mkBool(v.obj.cls.name === tn);
+        if (v.t === 'ref' && !v.obj.isArray) {
+          const target = this.classes.get(tn);
+          return mkBool(!!target && this.isSubclass(v.obj.cls, target));
+        }
         return mkBool(false);
       }
     }
@@ -837,11 +1031,14 @@ export class Interpreter {
     }
     const cls = this.currentClass;
     if (cls) {
-      const f = cls.fields.get(name);
+      const ff = this.findField(cls, name);
+      const f = ff?.f;
       if (f) {
+        // a private field of the parent: the child cannot see it
+        if (!this.canAccess(f.modifiers, ff.owner)) throw this.notVisibleField(ff.owner, name, e.line, this.frame.thisObj);
         if (f.modifiers.static) {
-          this.event({ type: 'staticGet', cls: cls.name, field: name });
-          return cls.statics.get(name);
+          this.event({ type: 'staticGet', cls: ff.owner.name, field: name });
+          return ff.owner.statics.get(name);
         }
         if (this.frame.isStatic || !this.frame.thisObj) {
           throw new CompilationProblem(`Cannot make a static reference to the non-static field ${name}`, e.line,
@@ -863,17 +1060,17 @@ export class Interpreter {
     const name = e.name;
     if (target.t === 'class') {
       if (target.cls.builtin) return this.builtins.staticField(target.cls.builtin, name, e.line);
-      const cls = target.cls;
-      const f = cls.fields.get(name);
-      if (!f) throw new CompilationProblem(`${name} cannot be resolved or is not a field`, e.line);
-      if (!this.canAccess(f.modifiers, cls)) throw this.notVisibleField(cls, name, e.line);
+      const ff = this.findField(target.cls, name);
+      if (!ff) throw new CompilationProblem(`${name} cannot be resolved or is not a field`, e.line);
+      const { f, owner } = ff;
+      if (!this.canAccess(f.modifiers, owner)) throw this.notVisibleField(owner, name, e.line);
       if (!f.modifiers.static) {
-        throw new CompilationProblem(`Cannot make a static reference to the non-static field ${cls.name}.${name}`, e.line,
-          `${name} lives inside each object. Write it on an object (like jean.${name}), not on the class ${cls.name}.`);
+        throw new CompilationProblem(`Cannot make a static reference to the non-static field ${target.cls.name}.${name}`, e.line,
+          `${name} lives inside each object. Write it on an object (like jean.${name}), not on the class ${target.cls.name}.`);
       }
-      yield* this.ensureInit(cls);
-      this.event({ type: 'staticGet', cls: cls.name, field: name });
-      return cls.statics.get(name);
+      yield* this.ensureInit(owner);
+      this.event({ type: 'staticGet', cls: owner.name, field: name });
+      return owner.statics.get(name);
     }
     if (target.t === 'null') {
       throw this.npe(`Cannot read field "${name}" because ${this.describeExpr(e.target)} is null`, e.line);
@@ -884,12 +1081,15 @@ export class Interpreter {
     }
     if (target.t === 'ref') {
       const obj = target.obj;
-      const f = obj.cls.fields.get(name);
-      if (!f) throw new CompilationProblem(`${name} cannot be resolved or is not a field`, e.line);
-      if (!this.canAccess(f.modifiers, obj.cls)) throw this.notVisibleField(obj.cls, name, e.line, obj);
+      // Java looks in the declared type of the expression (Animal a = new Chien(): only Animal's fields)
+      const declared = e.target.kind === 'Super' ? this.currentClass.superCls : (this.classes.get(this.guessStaticType(e.target)) || obj.cls);
+      const ff = declared ? this.findField(declared, name) : null;
+      if (!ff) throw new CompilationProblem(`${name} cannot be resolved or is not a field`, e.line);
+      const { f, owner } = ff;
+      if (!this.canAccess(f.modifiers, owner)) throw this.notVisibleField(owner, name, e.line, obj);
       if (f.modifiers.static) {
-        this.event({ type: 'staticGet', cls: obj.cls.name, field: name });
-        return obj.cls.statics.get(name);
+        this.event({ type: 'staticGet', cls: owner.name, field: name });
+        return owner.statics.get(name);
       }
       this.event({ type: 'fieldGet', id: obj.id, field: name });
       return obj.fields.get(name);
@@ -903,8 +1103,10 @@ export class Interpreter {
   notVisibleField(cls, name, line, obj) {
     const f = cls.fields.get(name);
     const hint = f.modifiers.visibility === 'private'
-      ? `${name} is private: it is locked inside ${cls.name}. From outside, use a getter/setter (like get${cap(name)}()).`
-      : `${name} has no visibility word, so only classes of the same package (${cls.pkg || 'default'}) can use it.`;
+      ? `${name} is private: it is locked inside ${cls.name}${this.currentClass && this.isSubclass(this.currentClass, cls) ? ' — even its children cannot open it. Use protected, or a getter' : '. From outside, use a getter/setter'} (like get${cap(name)}()).`
+      : f.modifiers.visibility === 'protected'
+        ? `${name} is protected: only ${cls.name}, its children and its package (${cls.pkg || 'default'}) can use it.`
+        : `${name} has no visibility word, so only classes of the same package (${cls.pkg || 'default'}) can use it.`;
     const err = new CompilationProblem(`The field ${cls.name}.${name} is not visible`, line, hint);
     err.blocked = { kind: 'field', cls: cls.name, name, id: obj?.id ?? null, visibility: f.modifiers.visibility };
     this.event({ type: 'blocked', cls: cls.name, member: name, id: obj?.id ?? null, visibility: f.modifiers.visibility });
@@ -946,9 +1148,11 @@ export class Interpreter {
         };
       }
       const cls = this.currentClass;
-      const f = cls?.fields.get(target.name);
+      const ff = cls ? this.findField(cls, target.name) : null;
+      const f = ff?.f;
       if (f) {
-        if (f.modifiers.static) return this.staticLvalue(cls, f, line);
+        if (!this.canAccess(f.modifiers, ff.owner)) throw this.notVisibleField(ff.owner, target.name, line, this.frame.thisObj);
+        if (f.modifiers.static) return this.staticLvalue(ff.owner, f, line);
         if (this.frame.isStatic || !this.frame.thisObj) throw new CompilationProblem(`Cannot make a static reference to the non-static field ${target.name}`, line);
         return this.fieldLvalue(this.frame.thisObj, f, line);
       }
@@ -959,12 +1163,13 @@ export class Interpreter {
       const t = yield* this.eval(target.target);
       if (t.t === 'class') {
         if (t.cls.builtin) throw new CompilationProblem(`The final field ${t.cls.name}.${target.name} cannot be assigned`, line);
-        const f = t.cls.fields.get(target.name);
-        if (!f) throw new CompilationProblem(`${target.name} cannot be resolved or is not a field`, line);
-        if (!this.canAccess(f.modifiers, t.cls)) throw this.notVisibleField(t.cls, target.name, line);
+        const ff = this.findField(t.cls, target.name);
+        if (!ff) throw new CompilationProblem(`${target.name} cannot be resolved or is not a field`, line);
+        const { f, owner } = ff;
+        if (!this.canAccess(f.modifiers, owner)) throw this.notVisibleField(owner, target.name, line);
         if (!f.modifiers.static) throw new CompilationProblem(`Cannot make a static reference to the non-static field ${t.cls.name}.${target.name}`, line);
-        yield* this.ensureInit(t.cls);
-        return this.staticLvalue(t.cls, f, line);
+        yield* this.ensureInit(owner);
+        return this.staticLvalue(owner, f, line);
       }
       if (t.t === 'null') throw this.npe(`Cannot assign field "${target.name}" because ${this.describeExpr(target.target)} is null`, line);
       if (t.t === 'ref' && t.obj.isArray) {
@@ -972,10 +1177,12 @@ export class Interpreter {
         throw new CompilationProblem(`${target.name} cannot be resolved or is not a field`, line);
       }
       if (t.t !== 'ref') throw new CompilationProblem(`${target.name} cannot be resolved or is not a field`, line);
-      const f = t.obj.cls.fields.get(target.name);
-      if (!f) throw new CompilationProblem(`${target.name} cannot be resolved or is not a field`, line);
-      if (!this.canAccess(f.modifiers, t.obj.cls)) throw this.notVisibleField(t.obj.cls, target.name, line, t.obj);
-      if (f.modifiers.static) return this.staticLvalue(t.obj.cls, f, line);
+      const declared = target.target.kind === 'Super' ? this.currentClass.superCls : (this.classes.get(this.guessStaticType(target.target)) || t.obj.cls);
+      const ff = declared ? this.findField(declared, target.name) : null;
+      if (!ff) throw new CompilationProblem(`${target.name} cannot be resolved or is not a field`, line);
+      const { f, owner } = ff;
+      if (!this.canAccess(f.modifiers, owner)) throw this.notVisibleField(owner, target.name, line, t.obj);
+      if (f.modifiers.static) return this.staticLvalue(owner, f, line);
       return this.fieldLvalue(t.obj, f, line);
     }
     if (target.kind === 'Index') {
@@ -994,7 +1201,7 @@ export class Interpreter {
       get: () => obj.fields.get(f.name),
       set: (v) => {
         if (f.modifiers.final) {
-          const inOwnCtor = this.frame.method?.isCtor && this.frame.thisObj === obj;
+          const inOwnCtor = this.frame.method?.isCtor && this.frame.thisObj === obj && this.frame.cls === obj.fieldOwner?.get(f.name);
           if (f.init || !inOwnCtor || obj.finalAssigned.has(f.name)) {
             throw new CompilationProblem(`The final field ${obj.cls.name}.${f.name} cannot be assigned`, line,
               `${f.name} is final: it is in a glass box. You can read it, but it can only get its value once (in the constructor).`);
@@ -1070,7 +1277,7 @@ export class Interpreter {
           throw new CompilationProblem(`Incompatible operand types ${valueTypeName(l)} and ${valueTypeName(r)}`, line);
         }
       }
-      if (l.t === 'ref' && r.t === 'ref' && !l.obj.isArray && !r.obj.isArray && l.obj.cls !== r.obj.cls) {
+      if (l.t === 'ref' && r.t === 'ref' && !l.obj.isArray && !r.obj.isArray && !this.isSubclass(l.obj.cls, r.obj.cls) && !this.isSubclass(r.obj.cls, l.obj.cls)) {
         throw new CompilationProblem(`Incompatible operand types ${valueTypeName(l)} and ${valueTypeName(r)}`, line);
       }
       const eq = this.valuesEqual(l, r, false);
@@ -1151,26 +1358,40 @@ export class Interpreter {
     if (isNumeric(v) || v.t === 'boolean') throw new CompilationProblem(`Cannot cast from ${v.t} to ${tn}`, e.line);
     const vt = valueTypeName(v);
     if (vt === typeName(e.type)) return v;
+    const target = this.classes.get(tn);
+    if (v.t === 'ref' && !v.obj.isArray && target) {
+      if (this.isSubclass(v.obj.cls, target)) return v; // the real object is a tn (or a child of it)
+      const st = this.classes.get(this.guessStaticType(e.expr));
+      if (st && !this.isSubclass(target, st) && !this.isSubclass(st, target)) {
+        throw new CompilationProblem(`Cannot cast from ${st.name} to ${tn}`, e.line);
+      }
+      const q = (c) => c.fullName;
+      throw new JavaException('java.lang.ClassCastException',
+        `class ${q(v.obj.cls)} cannot be cast to class ${q(target)} (${q(v.obj.cls)} and ${q(target)} are in unnamed module of loader 'app')`, e.line,
+        `The object is really a ${v.obj.cls.name}, not a ${tn}. Check it first with instanceof.`);
+    }
     throw new JavaException('java.lang.ClassCastException', `class ${vt} cannot be cast to class ${tn}`, e.line);
   }
 
   // ================= method calls =================
   *evalCall(e, asStatement) {
     const name = e.name;
-    // unqualified call: method of the current class
+    // unqualified call: method of the current class (or inherited from a parent)
     if (!e.target) {
       const cls = this.currentClass;
-      const candidates = cls.methods.filter(m => m.name === name);
+      const candidates = this.methodsNamed(cls, name);
       const args = yield* this.evalArgs(e.args);
       if (candidates.length === 0) {
         throw new CompilationProblem(`The method ${name}(${args.map(valueTypeName).join(', ')}) is undefined for the type ${cls.name}`, e.line);
       }
       const m = this.chooseMethod(cls, candidates, args, e.line, false, name);
-      if (!m.modifiers.static && (this.frame.isStatic || !this.frame.thisObj)) {
+      if (!this.canAccess(m.modifiers, m.owner)) throw this.notVisibleMethod(m.owner, m, e.line, this.frame.thisObj);
+      if (m.modifiers.static) return this.checkVoidUse(yield* this.invoke(m.owner, m, null, args, e.line), m, asStatement, e);
+      if (this.frame.isStatic || !this.frame.thisObj) {
         throw new CompilationProblem(`Cannot make a static reference to the non-static method ${sigOf(m)} from the type ${cls.name}`, e.line,
           `${name}() works on one object. Here you are in a static method (no object). Create an object first, then call obj.${name}().`);
       }
-      return this.checkVoidUse(yield* this.invoke(cls, m, m.modifiers.static ? null : this.frame.thisObj, args, e.line), m, asStatement, e);
+      return yield* this.callOnObject(this.frame.thisObj, m, args, e, asStatement, false);
     }
 
     // System.out.println & co
@@ -1189,23 +1410,25 @@ export class Interpreter {
       const args = yield* this.evalArgs(e.args);
       if (target.cls.builtin) return yield* this.builtins.staticCall(target.cls.builtin, name, args, e.line);
       const cls = target.cls;
-      const candidates = cls.methods.filter(m => m.name === name);
+      const candidates = this.methodsNamed(cls, name);
       if (candidates.length === 0) throw new CompilationProblem(`The method ${name}(${args.map(valueTypeName).join(', ')}) is undefined for the type ${cls.name}`, e.line);
       const m = this.chooseMethod(cls, candidates, args, e.line, false, name);
-      if (!this.canAccess(m.modifiers, cls)) throw this.notVisibleMethod(cls, m, e.line);
+      if (!this.canAccess(m.modifiers, m.owner)) throw this.notVisibleMethod(m.owner, m, e.line);
       if (!m.modifiers.static) {
         this.event({ type: 'blocked', cls: cls.name, member: name, id: null, visibility: 'static' });
         throw new CompilationProblem(`Cannot make a static reference to the non-static method ${sigOf(m)} from the type ${cls.name}`, e.line,
           `${name}() needs an object (a house). ${cls.name} is only the blueprint. Use a variable like obj.${name}().`);
       }
-      yield* this.ensureInit(cls);
-      return this.checkVoidUse(yield* this.invoke(cls, m, null, args, e.line), m, asStatement, e);
+      yield* this.ensureInit(m.owner);
+      return this.checkVoidUse(yield* this.invoke(m.owner, m, null, args, e.line), m, asStatement, e);
     }
 
     if (target.t === 'null') {
       yield* this.evalArgs(e.args);
       const cls = this.guessStaticType(e.target);
-      throw this.npe(`Cannot invoke "${cls ? cls + '.' : ''}${name}()" because ${this.describeExpr(e.target)} is null`, e.line);
+      const m = cls ? this.findMethodDecl(cls, name) : null;
+      const owner = m ? m.owner.name : cls;
+      throw this.npe(`Cannot invoke "${owner ? owner + '.' : ''}${name}(${m ? m.params.map(p => typeName(p.type)).join(', ') : ''})" because ${this.describeExpr(e.target)} is null`, e.line);
     }
 
     const args = yield* this.evalArgs(e.args);
@@ -1222,13 +1445,42 @@ export class Interpreter {
     }
     if (target.t === 'ref') {
       const obj = target.obj;
-      const candidates = obj.cls.methods.filter(m => m.name === name);
-      if (candidates.length === 0) return yield* this.objectMethod(target, name, args, e.line, obj.cls.name);
-      const m = this.chooseMethod(obj.cls, candidates, args, e.line, false, name);
-      if (!this.canAccess(m.modifiers, obj.cls)) throw this.notVisibleMethod(obj.cls, m, e.line, obj);
-      return this.checkVoidUse(yield* this.invoke(obj.cls, m, m.modifiers.static ? null : obj, args, e.line), m, asStatement, e);
+      const isSuper = e.target.kind === 'Super';
+      // Java looks for the method in the DECLARED type (Animal a = new Chien(): only Animal's methods)...
+      let declared = isSuper ? this.currentClass.superCls : this.classes.get(this.guessStaticType(e.target));
+      if (!declared || !this.isSubclass(obj.cls, declared)) declared = obj.cls;
+      const candidates = this.methodsNamed(declared, name);
+      if (candidates.length === 0) {
+        if (['toString', 'equals', 'hashCode', 'getClass'].includes(name)) return yield* this.objectMethod(target, name, args, e.line, declared.name, isSuper);
+        throw new CompilationProblem(`The method ${name}(${args.map(valueTypeName).join(', ')}) is undefined for the type ${declared.name}`, e.line,
+          declared !== obj.cls && this.methodsNamed(obj.cls, name).length
+            ? `The variable is declared as ${declared.name}, and ${declared.name} has no ${name}(). The object is really a ${obj.cls.name}: cast it first, like ((${obj.cls.name}) x).${name}().`
+            : undefined);
+      }
+      const m = this.chooseMethod(declared, candidates, args, e.line, false, name);
+      if (!this.canAccess(m.modifiers, m.owner)) throw this.notVisibleMethod(m.owner, m, e.line, obj);
+      if (m.modifiers.static) return this.checkVoidUse(yield* this.invoke(m.owner, m, null, args, e.line), m, asStatement, e);
+      // ...but the version that runs is the one of the REAL object (late binding / @Override)
+      return yield* this.callOnObject(obj, m, args, e, asStatement, isSuper);
     }
     throw new CompilationProblem(`Cannot invoke ${name}(${args.map(valueTypeName).join(', ')}) on the primitive type ${target.t}`, e.line);
+  }
+
+  // Run method m on obj: choose the overriding version (unless super.m()), and tell the scene why.
+  *callOnObject(obj, m, args, e, asStatement, isSuper) {
+    if (isSuper && m.abstract) {
+      throw new CompilationProblem(`Cannot directly invoke the abstract method ${sigOf(m)} for the type ${m.owner.name}`, e.line);
+    }
+    const run = isSuper ? m : this.dispatch(obj.cls, m);
+    const parentHas = run.owner.superCls && this.allMethods(run.owner.superCls).some(x => sigOf(x) === sigOf(run) && !x.modifiers.static);
+    if (isSuper) {
+      this.event({ type: 'dispatch', kind: 'super', method: run.name, cls: run.owner.name, objCls: obj.cls.name, id: obj.id });
+    } else if (run.owner !== obj.cls) {
+      this.event({ type: 'dispatch', kind: 'inherited', method: run.name, cls: run.owner.name, objCls: obj.cls.name, id: obj.id });
+    } else if (parentHas) {
+      this.event({ type: 'dispatch', kind: 'override', method: run.name, cls: run.owner.name, objCls: obj.cls.name, id: obj.id, declared: m.owner.name });
+    }
+    return this.checkVoidUse(yield* this.invoke(run.owner, run, obj, args, e.line), m, asStatement, e);
   }
 
   checkVoidUse(result, m, asStatement, e) {
@@ -1246,8 +1498,11 @@ export class Interpreter {
   }
 
   // Methods every object has (from java.lang.Object)
-  *objectMethod(target, name, args, line, typeLabel) {
-    if (name === 'toString' && args.length === 0) return mkStr(yield* this.stringOf(target, line));
+  *objectMethod(target, name, args, line, typeLabel, objectVersion = false) {
+    if (name === 'toString' && args.length === 0) {
+      if (objectVersion) return mkStr(target.obj.cls.fullName + '@' + this.hashOf(target.obj));
+      return mkStr(yield* this.stringOf(target, line));
+    }
     if (name === 'equals' && args.length === 1) return mkBool(this.valuesEqual(target, args[0], false));
     if (name === 'hashCode' && args.length === 0) return mkInt(parseInt(this.hashOf(target.obj), 16));
     if (name === 'getClass') throw new UnsupportedFeature('getClass() is not supported yet.', line);
@@ -1271,13 +1526,14 @@ export class Interpreter {
         inner += code[et.name] || ('L' + this.qualifiedName(et.name) + ';');
         return '[' + inner + '@' + this.hashOf(obj);
       }
-      const ts = obj.cls.methods.find(m => m.name === 'toString' && m.params.length === 0 && !m.modifiers.static);
+      const ts = this.allMethods(obj.cls).find(m => m.name === 'toString' && m.params.length === 0 && !m.modifiers.static);
       if (ts) {
         if (ts.modifiers.visibility !== 'public') {
           throw new CompilationProblem('Cannot reduce the visibility of the inherited method from Object', ts.line);
         }
         this.event({ type: 'autoToString', id: obj.id });
-        const r = yield* this.invoke(obj.cls, ts, obj, [], line);
+        if (ts.owner !== obj.cls) this.event({ type: 'dispatch', kind: 'inherited', method: 'toString', cls: ts.owner.name, objCls: obj.cls.name, id: obj.id });
+        const r = yield* this.invoke(ts.owner, ts, obj, [], line);
         if (r.t === 'null') return 'null';
         return r.v;
       }
@@ -1324,7 +1580,7 @@ export class Interpreter {
   }
   describeExprRaw(e) {
     switch (e.kind) {
-      case 'Name': return this.lookupLocal(e.name) ? e.name : (this.currentClass?.fields.get(e.name) ? 'this.' + e.name : e.name);
+      case 'Name': return this.lookupLocal(e.name) ? e.name : (this.currentClass && this.findField(this.currentClass, e.name) ? 'this.' + e.name : e.name);
       case 'This': return 'this';
       case 'Field': return this.describeExprRaw(e.target) + '.' + e.name;
       case 'Index': return this.describeExprRaw(e.target) + '[' + this.describeExprRaw(e.index) + ']';
@@ -1337,7 +1593,7 @@ export class Interpreter {
 
   findMethodDecl(clsName, name) {
     const c = this.classes.get(clsName);
-    return c ? c.methods.find(m => m.name === name) : null;
+    return c ? this.allMethods(c).find(m => m.name === name) : null;
   }
 
   // The declared type of an expression, as far as we can tell (for messages).
@@ -1345,15 +1601,19 @@ export class Interpreter {
     if (e.kind === 'Name') {
       const l = this.lookupLocal(e.name);
       if (l) return typeName(l.type);
-      const f = this.currentClass?.fields.get(e.name);
-      if (f) return typeName(f.type);
+      const ff = this.currentClass ? this.findField(this.currentClass, e.name) : null;
+      if (ff) return typeName(ff.f.type);
     }
     if (e.kind === 'This') return this.currentClass?.name;
+    if (e.kind === 'Super') return this.currentClass?.superCls?.name || 'Object';
+    if (e.kind === 'New') return e.type.name;
+    if (e.kind === 'Cast') return typeName(e.type);
     if (e.kind === 'Paren') return this.guessStaticType(e.expr);
     if (e.kind === 'Field') {
       const t = this.guessStaticType(e.target);
-      const f = this.classes.get(t)?.fields.get(e.name);
-      if (f) return typeName(f.type);
+      const c = this.classes.get(t);
+      const ff = c ? this.findField(c, e.name) : null;
+      if (ff) return typeName(ff.f.type);
     }
     if (e.kind === 'Index') {
       const t = this.guessStaticType(e.target);
@@ -1406,13 +1666,15 @@ export class Interpreter {
       : {
         id: o.id, cls: o.cls.name, reachable: reachable.has(o.id),
         fields: [...o.fields].map(([name, value]) => {
-          const f = o.cls.fields.get(name);
-          return { name, type: typeName(f.type), visibility: f.modifiers.visibility, final: f.modifiers.final, value: this.describeValue(value) };
+          const ff = this.findField(o.cls, name);
+          const f = ff.f;
+          return { name, type: typeName(f.type), visibility: f.modifiers.visibility, final: f.modifiers.final, value: this.describeValue(value), from: ff.owner.name };
         }),
       });
 
     const classes = [...this.classes.values()].map(c => ({
       name: c.name, pkg: c.pkg, isPublic: c.isPublic, line: c.decl.line, endLine: c.decl.endLine,
+      superName: c.superCls ? c.superCls.name : null, isAbstract: c.isAbstract,
       fields: [...c.fields.values()].map(f => ({
         name: f.name, type: typeName(f.type), visibility: f.modifiers.visibility, static: f.modifiers.static, final: f.modifiers.final, line: f.line,
         value: f.modifiers.static ? this.describeValue(c.statics.get(f.name)) : null,
@@ -1420,7 +1682,7 @@ export class Interpreter {
       ctors: c.ctors.map(m => ({ params: m.params.map(p => typeName(p.type) + ' ' + p.name), visibility: m.modifiers.visibility, line: m.line })),
       methods: c.methods.map(m => ({
         name: m.name, params: m.params.map(p => typeName(p.type) + ' ' + p.name), returnType: typeName(m.returnType),
-        visibility: m.modifiers.visibility, static: m.modifiers.static, line: m.line,
+        visibility: m.modifiers.visibility, static: m.modifiers.static, line: m.line, abstract: !!m.abstract,
       })),
     }));
 

@@ -35,6 +35,16 @@ export function explainStep(step, prevStep) {
       case 'varSet': lines.push(`The variable ${e.name} now holds ${val(e.value)}.`); break;
       case 'arraySet': lines.push(`Box [${e.index}] of array #${e.id} now holds ${val(e.value)}.`); break;
       case 'print': lines.push(`The console prints: ${JSON.stringify(e.text.replace(/\n$/, ''))}`); break;
+      case 'superCall':
+        lines.push(e.explicit
+          ? `super(...): first the ${e.parent} part of house #${e.thisId} is built, with the ${e.parent} constructor.`
+          : `No super(...) written: Java calls super() by itself, to build the ${e.parent} part first.`);
+        break;
+      case 'dispatch':
+        if (e.kind === 'inherited') lines.push(`${e.objCls} has no ${e.method}() of its own: it uses the one inherited from ${e.cls}.`);
+        else if (e.kind === 'override') lines.push(`${e.objCls} has its own ${e.method}() (@Override): this version runs, not the one of ${e.declared}.`);
+        else if (e.kind === 'super') lines.push(`super.${e.method}(): run the version of the parent class ${e.cls}.`);
+        break;
       case 'rejected':
         lines.push(e.field
           ? `${e.method}(${val(e.value)}) refused the value: ${e.field} stays ${val(e.kept)}.`

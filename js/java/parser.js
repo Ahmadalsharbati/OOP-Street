@@ -185,8 +185,11 @@ class Parser {
       let body = null;
       if (this.accept(';')) {
         if (!mods.abstract) throw new JavaSyntaxError('This method requires a body instead of a semicolon', nameTok.line);
-        throw new UnsupportedFeature('Abstract methods are not supported yet.', nameTok.line);
+        // abstract method: no body, the child classes must write it
+        cls.methods.push({ kind: 'Method', name, params, returnType: type, modifiers: mods, body: null, abstract: true, line: nameTok.line, endLine: nameTok.line });
+        return;
       }
+      if (mods.abstract) throw new JavaSyntaxError(`Abstract methods do not specify a body`, nameTok.line);
       body = this.parseBlock();
       cls.methods.push({ kind: 'Method', name, params, returnType: type, modifiers: mods, body, line: nameTok.line, endLine: body.endLine });
       return;
@@ -585,7 +588,11 @@ class Parser {
           case 'true': case 'false': this.next(); return { kind: 'Literal', type: 'boolean', value: tk.value === 'true', line };
           case 'null': this.next(); return { kind: 'Literal', type: 'null', value: null, line };
           case 'this': this.next(); return { kind: 'This', line };
-          case 'super': throw new UnsupportedFeature('"super" is not supported yet (inheritance comes later).', line);
+          case 'super':
+            // super.method(...) or super.field : the parent class version
+            this.next();
+            if (!this.is('.')) throw new JavaSyntaxError('Syntax error on token "super", . expected', line);
+            return { kind: 'Super', line };
           case 'new': return this.parseNew();
           case 'int': case 'double': case 'boolean': case 'char': case 'long': case 'float': case 'short': case 'byte':
             // int.class etc. — not supported
