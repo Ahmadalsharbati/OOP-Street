@@ -65,6 +65,10 @@ Every class becomes a district with its blueprint board, and every `new` builds 
   - **agrégation ◇ or composition ◆ is found automatically**: `new B(...)` put in the field inside the class = composition;
     a parameter put in the field (constructor, setter, `ajouter...`) = agrégation. Each relation says **why**;
   - live: the class running now is yellow, a relation that changes in this step turns orange.
+- **Concepts** (button over the street): the OOP concepts of YOUR program as glowing picture cards
+  (class & objects, encapsulation, inheritance, polymorphism, abstraction, composition, agrégation, two-way,
+  static, super, null & GC, the error of the run). Only what the code really uses. Download one card or all
+  of them as one PNG poster.
 - **Click a line number** to jump to the moment that line runs. `×3` next to the number = it runs 3 times;
   click again for the next time. Click a class or field line to fly to its district. **Replay** plays the line again slowly,
   **Play** (or Space) runs the program by itself.

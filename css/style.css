@@ -362,3 +362,21 @@ details[open] > summary.v-row::before { transform: rotate(90deg); }
 .bd.prot { background: #ede9fe; color: #6d28d9; }
 .uml-svg .uml-title.abstract, .uml-svg .uml-line.abstract { font-style: italic; }
 .uml-relations .rel .kind.heritage { background: #ede9fe; color: #6d28d9; }
+
+/* ---------- Concepts cards ---------- */
+.concepts-panel {
+  position: absolute; inset: 56px 12px 12px 12px; z-index: 30001; background: #0b0e22; color: #eef0ff;
+  border-radius: 14px; box-shadow: 0 20px 60px rgba(16, 24, 40, 0.35); display: flex; flex-direction: column; overflow: hidden;
+}
+.concepts-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 18px; border-bottom: 1px solid #1f2547; }
+.concepts-head b { font-size: 15px; }
+.concepts-head span { color: #8b93c7; font-size: 12.5px; }
+.concepts-head .btn { background: #171b33; color: #eef0ff; border-color: #2a3060; }
+.concepts-head .btn:hover { background: #1f2547; }
+.concepts-head #concepts-all { margin-left: auto; }
+.concepts-grid { flex: 1; overflow: auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 14px; align-content: start; }
+.concept { position: relative; }
+.concept svg { width: 100%; height: auto; display: block; }
+.concept .dl { position: absolute; top: 12px; right: 12px; background: rgba(23, 27, 51, 0.9); color: #c7cdf5; border: 1px solid #2a3060; border-radius: 8px; height: 28px; font-size: 12px; padding: 0 10px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.concept:hover .dl { opacity: 1; }
+.concepts-empty { color: #8b93c7; padding: 20px; }

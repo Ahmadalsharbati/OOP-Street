@@ -70,6 +70,7 @@
           <button id="btn-all" class="btn" title="Show everything">Show all</button>
         </div>
         <button id="btn-uml" class="btn" title="UML class diagram of your code">UML</button>
+        <button id="btn-concepts" class="btn" title="The OOP concepts of your program, as pictures">Concepts</button>
         <button id="btn-follow" class="btn on" title="The camera follows the person">Follow</button>
         <div class="seg">
           <button id="btn-zoom-out" class="btn icon" title="Zoom out">−</button>
@@ -102,6 +103,16 @@
       </div>
       <div class="stage-help">Drag to move · Scroll to zoom</div>
       <div id="codecard" class="codecard-slot"></div>
+
+      <div id="concepts-panel" class="concepts-panel" hidden>
+        <div class="concepts-head">
+          <b>OOP concepts, visualized</b>
+          <span>made from your program · only what your code really uses</span>
+          <button id="concepts-all" class="btn" title="Download all cards as one image">Download all (PNG)</button>
+          <button id="concepts-close" class="btn icon" title="Close (Esc)">✕</button>
+        </div>
+        <div id="concepts-grid" class="concepts-grid"></div>
+      </div>
 
       <div id="uml-panel" class="uml-panel" hidden>
         <div class="uml-head">

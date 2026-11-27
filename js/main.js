@@ -6,6 +6,7 @@ import { explainStep } from './ui/explain.js';
 import { highlightJava } from './ui/highlight.js';
 import { EXAMPLES } from './examples.js';
 import { analyzeUml, renderUml } from './ui/uml.js';
+import { buildConcepts, cardSvg, svgToPng, posterSvg } from './ui/concepts.js';
 
 const $ = (id) => document.getElementById(id);
 const editor = $('code');
@@ -226,6 +227,7 @@ function compileAndRun() {
   stopPlay();
   indexLines();
   umlModel = run.program ? analyzeUml(run.program) : null;
+  if (!$('concepts-panel').hidden) setTimeout(renderConcepts, 0);
   setFollow(true);
   show();
 }
@@ -458,6 +460,7 @@ function markFlash(line) {
   setTimeout(() => markLine(lineMark, old), 1500);
 }
 function showUml(on) {
+  if (on && !$('concepts-panel').hidden) { $('concepts-panel').hidden = true; $('btn-concepts').classList.remove('on'); }
   $('uml-panel').hidden = !on;
   $('btn-uml').classList.toggle('on', on);
   if (on) renderUmlPanel();
@@ -465,6 +468,47 @@ function showUml(on) {
 $('btn-uml').addEventListener('click', () => showUml($('uml-panel').hidden));
 $('uml-close').addEventListener('click', () => showUml(false));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('uml-panel').hidden) showUml(false); });
+
+// ---------- Concepts cards ----------
+let conceptCards = [];
+function renderConcepts() {
+  const grid = $('concepts-grid');
+  conceptCards = run ? buildConcepts(run, umlModel) : [];
+  if (!conceptCards.length) {
+    grid.innerHTML = '<p class="concepts-empty">Run a program first: the cards are made from your code.</p>';
+    return;
+  }
+  grid.replaceChildren(...conceptCards.map(c => {
+    const d = document.createElement('div');
+    d.className = 'concept';
+    d.innerHTML = cardSvg(c) + '<button class="dl" title="Download this card">⬇ PNG</button>';
+    d.querySelector('.dl').addEventListener('click', () => downloadPng(cardSvg(c), `oop-street-${c.n}-${c.key}.png`));
+    return d;
+  }));
+}
+async function downloadPng(svg, name) {
+  try {
+    const blob = await svgToPng(svg, 2);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (e) { console.error(e); }
+}
+function showConcepts(on) {
+  $('concepts-panel').hidden = !on;
+  $('btn-concepts').classList.toggle('on', on);
+  if (on) { showUml(false); renderConcepts(); }
+}
+$('btn-concepts').addEventListener('click', () => showConcepts($('concepts-panel').hidden));
+$('concepts-close').addEventListener('click', () => showConcepts(false));
+$('concepts-all').addEventListener('click', () => {
+  if (!conceptCards.length) return;
+  const title = (run.mainClass ? run.mainClass + ' — ' : '') + 'OOP concepts';
+  downloadPng(posterSvg(conceptCards, title), 'oop-street-concepts.png');
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('concepts-panel').hidden) showConcepts(false); });
 
 // ---------- tabs ----------
 let currentTab = 'vars';
