@@ -25,8 +25,8 @@ export function compile(source) {
 }
 
 export function runProgram(source, { mainClass = null, maxSteps = MAX_STEPS } = {}) {
-  const { interp, error } = compile(source);
-  const result = { steps: [], error: null, problems: [], mainClasses: [], mainClass: null, finished: false, classes: [] };
+  const { program, interp, error } = compile(source);
+  const result = { steps: [], error: null, problems: [], mainClasses: [], mainClass: null, finished: false, classes: [], program };
   if (error) { result.error = error; return result; }
 
   result.problems = interp.problems;

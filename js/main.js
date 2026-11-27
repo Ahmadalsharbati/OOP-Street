@@ -5,6 +5,7 @@ import { StreetScene } from './scene/scene.js';
 import { explainStep } from './ui/explain.js';
 import { highlightJava } from './ui/highlight.js';
 import { EXAMPLES } from './examples.js';
+import { analyzeUml, renderUml } from './ui/uml.js';
 
 const $ = (id) => document.getElementById(id);
 const editor = $('code');
@@ -224,6 +225,7 @@ function compileAndRun() {
   lastOutputLen = 0;
   stopPlay();
   indexLines();
+  umlModel = run.program ? analyzeUml(run.program) : null;
   setFollow(true);
   show();
 }
@@ -290,6 +292,7 @@ function show() {
   $('codecard').innerHTML = scene.codeCardHTML || '';
   updateButtons();
   renderGutter();
+  if (!$('uml-panel').hidden) renderUmlPanel();
   if (!playTimer && step.line !== replayLine) replayLine = step.final ? null : step.line;
   $('btn-replay').hidden = !replayLine || !!playTimer;
   $('replay-line').textContent = replayLine || '';
@@ -398,6 +401,61 @@ $('btn-big').addEventListener('click', () => {
   applySizes();
 });
 applySizes();
+
+// ---------- UML (phase 5) ----------
+let umlModel = null;
+const SYM = { composition: '◆——', aggregation: '◇——', association: '———' };
+function renderUmlPanel() {
+  const svgBox = $('uml-svg'), list = $('uml-relations');
+  if (!umlModel) { svgBox.innerHTML = '<p class="empty-note">Fix the code first, then the diagram appears.</p>'; list.replaceChildren(); return; }
+  const step = run.steps[index];
+  const state = step ? step.state : null;
+  const top = state && state.frames.length ? state.frames[state.frames.length - 1] : null;
+  const counts = {};
+  const clsOf = new Map();
+  if (state) for (const o of state.heap) if (!o.isArray) { counts[o.cls] = (counts[o.cls] || 0) + 1; clsOf.set(o.id, o.cls); }
+  const hot = new Set();
+  if (step) for (const e of step.events) if (e.type === 'fieldSet' && clsOf.has(e.id)) hot.add(clsOf.get(e.id) + '.' + e.field);
+  const panel = $('uml-panel');
+  panel.classList.toggle('narrow', panel.clientWidth < 900);
+  const avail = panel.classList.contains('narrow') ? panel.clientWidth - 30 : panel.clientWidth - 320;
+  svgBox.innerHTML = renderUml(umlModel, {
+    availableWidth: avail,
+    colorOf: (n) => '#' + scene.colorOf(n).toString(16).padStart(6, '0'),
+    active: top ? top.cls : null, counts, hotFields: hot,
+  });
+  if (!umlModel.relations.length) {
+    list.innerHTML = '<p class="none">No relations: no field has another class as its type.</p>';
+    return;
+  }
+  list.replaceChildren(...umlModel.relations.map(r => {
+    const d = document.createElement('div');
+    const isHot = hot.has(r.from + '.' + r.field) || (r.backField && hot.has(r.to + '.' + r.backField));
+    d.className = 'rel' + (isHot ? ' hot' : '');
+    const arrow = r.bidirectional ? SYM[r.kind] : SYM[r.kind] + '>';
+    const kindName = r.kind === 'aggregation' ? 'agrégation' : r.kind;
+    d.innerHTML = `<div class="top"></div><div><span class="kind ${r.kind}">${kindName}</span><span class="card"></span></div><div class="why"></div><span class="go">Show field in code →</span>`;
+    d.querySelector('.top').textContent = `${r.from} ${arrow} ${r.to}`;
+    d.querySelector('.card').textContent = r.bidirectional ? `${r.field}: ${r.card} · ${r.backField}: ${r.backCard}` : `${r.field}: ${r.card}`;
+    d.querySelector('.why').textContent = r.why;
+    d.querySelector('.go').addEventListener('click', () => { showUml(false); scrollToLine(r.line); markFlash(r.line); });
+    return d;
+  }));
+}
+function markFlash(line) {
+  markLine(errorMark, null);
+  const old = lineMark.dataset.line;
+  markLine(lineMark, line);
+  setTimeout(() => markLine(lineMark, old), 1500);
+}
+function showUml(on) {
+  $('uml-panel').hidden = !on;
+  $('btn-uml').classList.toggle('on', on);
+  if (on) renderUmlPanel();
+}
+$('btn-uml').addEventListener('click', () => showUml($('uml-panel').hidden));
+$('uml-close').addEventListener('click', () => showUml(false));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('uml-panel').hidden) showUml(false); });
 
 // ---------- tabs ----------
 let currentTab = 'vars';

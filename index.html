@@ -69,6 +69,7 @@
           <button id="btn-focus" class="btn on" title="Only what the current line uses is big">Focus</button>
           <button id="btn-all" class="btn" title="Show everything">Show all</button>
         </div>
+        <button id="btn-uml" class="btn" title="UML class diagram of your code">UML</button>
         <button id="btn-follow" class="btn on" title="The camera follows the person">Follow</button>
         <div class="seg">
           <button id="btn-zoom-out" class="btn icon" title="Zoom out">−</button>
@@ -100,6 +101,30 @@
       </div>
       <div class="stage-help">Drag to move · Scroll to zoom</div>
       <div id="codecard" class="codecard-slot"></div>
+
+      <div id="uml-panel" class="uml-panel" hidden>
+        <div class="uml-head">
+          <b>UML class diagram</b>
+          <span class="muted">made from your code · live: yellow = the class running now</span>
+          <button id="uml-close" class="btn icon" title="Close (Esc)">✕</button>
+        </div>
+        <div class="uml-body">
+          <div id="uml-svg" class="uml-canvas"></div>
+          <div class="uml-side">
+            <div class="uml-legend">
+              <div class="sec">How to read it</div>
+              <div class="txt"><b>+</b> public · <b>−</b> private · <b>~</b> package · <u>underlined</u> = static</div>
+              <div><svg width="56" height="12"><line x1="2" y1="6" x2="50" y2="6" stroke="#475069" stroke-width="1.5"/><path d="M44 1 L52 6 L44 11" fill="none" stroke="#475069" stroke-width="1.5"/></svg> knows the other (one way)</div>
+              <div><svg width="56" height="12"><line x1="2" y1="6" x2="52" y2="6" stroke="#475069" stroke-width="1.5"/></svg> both know each other</div>
+              <div><svg width="56" height="12"><path d="M2 6 L10 2 L18 6 L10 10 Z" fill="#fff" stroke="#475069" stroke-width="1.5"/><line x1="18" y1="6" x2="52" y2="6" stroke="#475069" stroke-width="1.5"/></svg> agrégation: comes from outside</div>
+              <div><svg width="56" height="12"><path d="M2 6 L10 2 L18 6 L10 10 Z" fill="#475069" stroke="#475069" stroke-width="1.5"/><line x1="18" y1="6" x2="52" y2="6" stroke="#475069" stroke-width="1.5"/></svg> composition: created inside</div>
+              <div class="txt"><b>0..1</b> one or none · <b>0..*</b> many (array)</div>
+            </div>
+            <div class="sec">Relations found in your code</div>
+            <div id="uml-relations" class="uml-relations"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <div class="splitter" id="split-right" title="Drag to resize · Double-click to hide/show the panel"><span></span></div>

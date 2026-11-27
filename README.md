@@ -58,6 +58,13 @@ Every class becomes a district with its blueprint board, and every `new` builds 
   - during `new`, **workers** build the house and fill its baskets; the **roof goes on** when the constructor ends;
   - when you step inside a method, a **code card** next to the house shows that method with the current line;
   - a setter that **refuses** a value (like `setAge(-3)` with an `if`) shows it: the value comes back, the field stays.
+- **Phase 5 — live UML class diagram** (button **UML** over the street), made from your code:
+  - classes with `+ − ~` visibility, static underlined, constructors and methods, and how many objects exist now;
+  - a field whose type is another class becomes a line: arrow = one way, plain line = both know each other,
+    `0..1` for one object, `0..*` for an array;
+  - **agrégation ◇ or composition ◆ is found automatically**: `new B(...)` put in the field inside the class = composition;
+    a parameter put in the field (constructor, setter, `ajouter...`) = agrégation. Each relation says **why**;
+  - live: the class running now is yellow, a relation that changes in this step turns orange.
 - **Click a line number** to jump to the moment that line runs. `×3` next to the number = it runs 3 times;
   click again for the next time. Click a class or field line to fly to its district. **Replay** plays the line again slowly,
   **Play** (or Space) runs the program by itself.
@@ -117,7 +124,7 @@ vendor/three/           three.js (MIT license), no CDN needed
 2. ✅ The generic interpreter + tests against the real JVM
 3. ✅ The 3D street: baskets, locks, windows, people with signs, camera that follows the line
 4. ✅ Connect every step to the street: knock, workers, code card, refused setter, clickable lines, Replay / Play
-5. Associations and arrays (Livre → Auteur, Etudiant ⇄ Classe) and a live UML diagram
+5. ✅ Associations and a live UML diagram (agrégation / composition found automatically)
 6. static, final, pile/tas, Garbage Collector, null
 7. Course examples, "Try the bug", Challenge mode, big exercises (10+ classes)
 
